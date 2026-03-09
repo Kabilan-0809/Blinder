@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blind AI Navigator</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #121212;
+            color: white;
+        }
+        
+        h1 {
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            width: 80%;
+            max-width: 400px;
+        }
+
+        button {
+            padding: 2rem;
+            font-size: 2rem;
+            font-weight: bold;
+            border: none;
+            border-radius: 16px;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        #startBtn {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        #stopBtn {
+            background-color: #f44336;
+            color: white;
+        }
+
+        button:disabled {
+            background-color: #555 !important;
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #status {
+            margin-top: 2rem;
+            font-size: 1.2rem;
+            text-align: center;
+            color: #aaa;
+        }
+        
+        #hiddenCanvas, #hiddenVideo {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Blind Navigator AI</h1>
+    
+    <div class="controls">
+        <button id="startBtn">START</button>
+        <button id="stopBtn" disabled>STOP</button>
+    </div>
+
+    <div id="status">Ready. Press START to begin.</div>
+
+    <video id="hiddenVideo" autoplay playsinline></video>
+    <canvas id="hiddenCanvas"></canvas>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusText = document.getElementById('status');
+        const video = document.getElementById('hiddenVideo');
+        const canvas = document.getElementById('hiddenCanvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        let ws = null;
+        let stream = null;
+        let intervalId = null;
+        let isRunning = false;
+        
+        // Initialize Speech Synthesis
+        const synth = window.speechSynthesis;
+        
+        function speak(text, priority = "scene") {
+            if (priority === "alert") {
+                // Instantly cancel whatever is currently speaking for an alert
+                synth.cancel();
+            }
+            
+            // If it's a scene description and we are already talking, skip it so we don't queue up
+            if (priority === "scene" && synth.speaking) {
+                return;
+            }
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.1; // Slightly faster for real-time navigation
+            synth.speak(utterance);
+        }
+
+        async function startNavigation() {
+            try {
+                // Request back camera
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: 640, height: 480 }
+                });
+                video.srcObject = stream;
+                
+                // Initialize WebSocket
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${protocol}//${window.location.host}/stream`);
+
+                ws.onopen = () => {
+                    isRunning = true;
+                    statusText.textContent = "Navigating... AI is running.";
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+                    
+                    speak("Navigation started. Scanning surroundings.", "scene");
+                    
+                    video.onloadedmetadata = () => {
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        
+                        // Send frames every 250ms (4 FPS)
+                        intervalId = setInterval(sendFrame, 250);
+                    };
+                };
+
+                ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        speak(data.text, data.type);
+                        
+                        // Briefly show the instruction on screen
+                        if (data.type === "alert") {
+                            statusText.textContent = `⚠️ ${data.text}`;
+                            statusText.style.color = "#f44336";
+                        } else {
+                            statusText.textContent = `👁️ ${data.text}`;
+                            statusText.style.color = "#4CAF50";
+                        }
+                    } catch (e) {
+                         console.error("Failed to parse response", e);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    console.error('WebSocket Error:', error);
+                    stopNavigation("Connection error.");
+                };
+
+                ws.onclose = () => {
+                    if (isRunning) stopNavigation("Disconnected from server.");
+                };
+
+            } catch (err) {
+                console.error("Error accessing camera:", err);
+                statusText.textContent = "Error: Camera access denied or unavailable.";
+                speak("Error. Cannot access camera.");
+            }
+        }
+
+        function sendFrame() {
+            if (!isRunning || ws.readyState !== WebSocket.OPEN) return;
+            
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob((blob) => {
+                if (blob) {
+                    ws.send(blob);
+                }
+            }, 'image/jpeg', 0.5); // Compress quality to 0.5 to reduce latency
+        }
+
+        function stopNavigation(msg = "Navigation stopped.") {
+            isRunning = false;
+            if (intervalId) clearInterval(intervalId);
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+            
+            synth.cancel();
+            speak(msg, "scene");
+            
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusText.textContent = "Ready. Press START to begin.";
+            statusText.style.color = "#aaa";
+        }
+
+        startBtn.addEventListener('click', startNavigation);
+        stopBtn.addEventListener('click', () => stopNavigation());
+    </script>
+</body>
+</html>

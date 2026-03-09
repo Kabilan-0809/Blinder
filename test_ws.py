@@ -2,6 +2,7 @@ import asyncio
 import websockets
 import cv2
 import numpy as np
+import json
 
 async def test_websocket():
     # create a dummy image frame (a black square)
@@ -11,7 +12,7 @@ async def test_websocket():
     _, buffer = cv2.imencode('.jpg', frame)
     data = buffer.tobytes()
 
-    uri = "ws://localhost:8000/stream"
+    uri = "ws://127.0.0.1:8000/stream"
     try:
         async with websockets.connect(uri) as ws:
             print("Connected to WebSocket.")
@@ -19,7 +20,8 @@ async def test_websocket():
             print("Sent black frame...")
             
             response = await ws.recv()
-            print(f"Received instruction: {response}")
+            data = json.loads(response)
+            print(f"Received instruction type [{data.get('type')}]: {data.get('text')}")
             
     except Exception as e:
         print(f"Error: {e}")
