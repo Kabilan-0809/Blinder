@@ -33,7 +33,8 @@ def process_frame(frame):
             objects_info.append({
                 "type": label,
                 "position": direction,
-                "distance": float(round(distance_proxy, 3))
+                "distance": float(round(distance_proxy, 3)),
+                "bbox": [x1, y1, x2, y2]
             })
 
     return objects_info

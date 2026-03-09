@@ -58,14 +58,18 @@ async def stream(ws: WebSocket):
             )
 
             # 1. Vision Processing (Resize & object extraction)
+            print(f"[pipeline] Processing frame at {current_time}...")
             objects_info = process_frame(frame)
+            print(f"[vision] Extracted {len(objects_info)} objects.")
             
             # 2. Priority Danger Evaluation (<1m)
             danger_alert = check_immediate_danger(objects_info)
             if danger_alert:
+                print(f"[danger] HIGH PRIORITY ALERT TRIGGERED: {danger_alert['instruction']}")
                 await ws.send_text(json.dumps({
                     "type": "alert",
-                    "text": danger_alert["instruction"]
+                    "text": danger_alert["instruction"],
+                    "objects": objects_info # Send objects back for UI
                 }))
                 continue # Skip full scene LLM processing for this frame
 
@@ -76,19 +80,28 @@ async def stream(ws: WebSocket):
             state = get_session(session_id)
             instruction_map = generate_guidance(scene_json, state)
             instruction_text = instruction_map["instruction"]
+            print(f"[llm] Generated guidance: '{instruction_text}'")
             
             # 5. Deduplication
             if instruction_text == state.get("last_instruction"):
                 # Scene or LLM conclusion hasn't changed enough to warrant re-speaking
+                print("[memory] Scene/instruction identical to last. Deduplicating (not speaking).")
+                await ws.send_text(json.dumps({
+                    "type": "debug",
+                    "objects": objects_info 
+                }))
                 continue
                 
             # Update Redis-ready context 
             update_session(session_id, instruction_text, scene_json, objects_info)
+            print("[memory] Session state updated.")
             
             # Return final guidance
+            print(f"[websocket] Sending instruction payload to client.")
             await ws.send_text(json.dumps({
                 "type": "scene",
-                "text": instruction_text
+                "text": instruction_text,
+                "objects": objects_info
             }))
             
     except WebSocketDisconnect:
