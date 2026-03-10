@@ -38,7 +38,7 @@ Your one-sentence guidance:"""
 
     try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash-8b",
+            model="gemini-2.0-flash-lite",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
