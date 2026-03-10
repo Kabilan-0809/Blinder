@@ -28,7 +28,7 @@ def scene_has_changed(session_id: str, objects_info: list) -> bool:
     
     return False
 
-def is_within_cooldown(session_id: str, cooldown_secs: float = 8.0) -> bool:
+def is_within_cooldown(session_id: str, cooldown_secs: float = 2.5) -> bool:
     """Returns True if we spoke recently and should be quiet."""
     state = get_session(session_id)
     return (time.time() - state["last_spoken_time"]) < cooldown_secs

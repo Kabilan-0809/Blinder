@@ -89,7 +89,7 @@ async def stream(ws: WebSocket):
             # Skip if: scene type-set is identical AND we're within cooldown
             # BUT always speak on the first message or if objects have changed
             scene_changed = scene_has_changed(session_id, objects_info)
-            within_cooldown = is_within_cooldown(session_id, cooldown_secs=8.0)
+            within_cooldown = is_within_cooldown(session_id)
 
             if not is_first and not scene_changed and within_cooldown:
                 logger.info(f"[DEDUP] Same objects within cooldown. Skipping LLM.")
@@ -98,7 +98,16 @@ async def stream(ws: WebSocket):
 
             # ── STAGE 6: LLM Scene Description ────────────────────────────
             logger.info(f"[LLM] Calling Gemini (first={is_first}, changed={scene_changed})...")
-            result = generate_guidance(scene_json, state["history"], is_first=is_first)
+            
+            # Run the synchronous GenAPI call in a background thread so we don't block
+            # the WebSocket loop from receiving new frames and running local danger checks!
+            import asyncio
+            result = await asyncio.to_thread(
+                generate_guidance, 
+                scene_json, 
+                state["history"], 
+                is_first=is_first
+            )
 
             if result["skip"]:
                 logger.info("[LLM] Returned SKIP.")

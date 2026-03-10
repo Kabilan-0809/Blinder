@@ -4,20 +4,25 @@ from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
 
-# YOLOv8n — lightweight. Lower confidence to catch more objects in cluttered scenes.
-model = YOLO("yolov8n.pt")
+# YOLOv8s (small) — much better accuracy than nano, auto-downloads on first run
+# Nano: 3.2M params, Small: 11.2M params — ~2x slower but significantly more accurate
+model = YOLO("yolov8s.pt")
+
+# Frame dimensions YOLO processes — 640px wide to maximise accuracy while keeping speed acceptable
+PROCESS_W = 640
+PROCESS_H = 480
+
 
 def process_frame(frame):
     """
-    Detect objects in the frame. Lower confidence (0.15) to catch more objects
-    in cluttered environments. Returns list of dicts with type, position, distance, bbox.
+    Detect objects in the frame using YOLOv8s.
+    Returns: list of dicts with type, position, distance, confidence, bbox, fill_ratio
     """
-    frame = cv2.resize(frame, (640, 480))
-    height, width = frame.shape[:2]
-    total_area = height * width
+    frame = cv2.resize(frame, (PROCESS_W, PROCESS_H))
+    total_area = PROCESS_W * PROCESS_H
 
-    # Lower confidence threshold to 0.15 so cluttered messy rooms get detected properly
-    results = model(frame, conf=0.15, verbose=False)
+    # Extremely low confidence to catch heavily occluded/dark objects in a messy room
+    results = model(frame, conf=0.10, verbose=False)
 
     objects_info = []
     for r in results:
@@ -28,11 +33,11 @@ def process_frame(frame):
 
             center_x = (x1 + x2) / 2
             area = (x2 - x1) * (y2 - y1)
-            distance_proxy = round(area / total_area, 3)
+            fill_ratio = round(area / total_area, 3)  # 0.0 (far) to 1.0 (fills screen)
 
-            if center_x < width / 3:
+            if center_x < PROCESS_W / 3:
                 direction = "left"
-            elif center_x > 2 * width / 3:
+            elif center_x > 2 * PROCESS_W / 3:
                 direction = "right"
             else:
                 direction = "center"
@@ -40,11 +45,11 @@ def process_frame(frame):
             objects_info.append({
                 "type": label,
                 "position": direction,
-                "distance": distance_proxy,
+                "distance": fill_ratio,   # larger = closer
                 "confidence": round(conf, 2),
                 "bbox": [x1, y1, x2, y2]
             })
 
-    labels = [f"{o['type']}({o['confidence']})" for o in objects_info]
-    logger.info(f"YOLO detected: {labels}")
+    labels = [f"{o['type']}@{o['position']}(dist={o['distance']})" for o in objects_info]
+    logger.info(f"[YOLO] {labels}")
     return objects_info
