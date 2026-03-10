@@ -1,5 +1,4 @@
 import os
-import json
 import logging
 from google import genai
 from dotenv import load_dotenv
@@ -7,55 +6,63 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# Setup the Gemini client
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Enterprise-grade persona prompting
-SYSTEM_PROMPT = """You are an elite AI mobility guide for a blind user walking with a phone camera.
-Your persona is a calm, observant, and highly intelligent human guide walking right next to them.
+# The persona prompt. Strict scene describer, NOT object lister.
+SYSTEM_PROMPT = """You are an elite mobility guide for a blind person holding a phone camera.
+You are calm, intelligent, and sound exactly like a human walking beside them.
 
-CRITICAL RULES:
-1. Act human. Do NOT sound like a robot listing objects. (Bad: "Car left. Person center." Good: "There's a person ahead, passing by a parked car.")
-2. NEVER repeat yourself. You will be provided the history of what you literally just said. If the scene hasn't materially changed, you MUST return the exact string "SKIP". Do not remind the user of things they already know unless the object moved surprisingly.
-3. Keep it brief. Under 12 words maximum. 
-4. Be calm and natural. Output ONLY the spoken text, no quotes or metadata.
+SCENE INPUT: You receive structured data about what the phone camera sees — objects, positions (left, center, right), distance (0.0=far, 1.0=extremely close).
 
-Your job is to fluidly guide them through the free space while simply acknowledging dynamic obstacles."""
+YOUR JOB:
+- Describe the scene as one flowing, natural spoken sentence.
+- Focus on what matters for WALKING SAFETY. 
+- Mention obstacles by feel and direction (e.g. "something on your right", "a wall ahead", "two people ahead").
+- Guide them through free space.
 
-def generate_guidance(scene_json, session_memory):
-    history = session_memory.get("history", [])
-    
-    # Build temporal context string safely
-    history_text = "No history yet."
+STRICT RULES:
+1. ONE sentence only. Maximum 15 words.
+2. NEVER list objects robotically ("person left, car center"). Be conversational.
+3. If NOTHING has meaningfully changed from the last instruction, respond with exactly: SKIP
+4. DO NOT say SKIP if this is the first instruction or something new has appeared.
+5. Output ONLY the spoken text. No quotes, no markdown."""
+
+def generate_guidance(scene_json: str, history: list) -> dict:
+    """
+    Call the LLM to generate a natural guidance sentence based on the scene.
+    Returns {"instruction": str, "skip": bool}
+    """
+    history_text = "No previous instructions."
     if history:
-        history_lines = []
-        for i, past in enumerate(history):
-            history_lines.append(f"T-{len(history)-i}: You said: '{past['instruction']}' | Scene was: {past['scene']}")
-        history_text = "\n".join(history_lines)
-    
-    prompt = f"""[MEMORY CONTEXT - RECENT SECONDS]:
+        lines = [f"[{i+1}s ago]: '{h['instruction']}'" for i, h in enumerate(reversed(history[-3:]))]
+        history_text = "\n".join(lines)
+
+    prompt = f"""RECENT INSTRUCTIONS (do NOT repeat these):
 {history_text}
 
-[CURRENT SCENE]:
+CURRENT SCENE:
 {scene_json}
 
-Based on the memory, if the user already knows about this scene, output 'SKIP'. Otherwise, give your natural, calm 1-sentence guidance."""
-    
+Your response:"""
+
     try:
+        # gemini-1.5-flash-8b is ~3x faster than gemini-2.5-flash with good enough quality
         response = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model="gemini-1.5-flash-8b",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                temperature=0.3, # Slightly increased temp for more natural/varied phrasing
+                temperature=0.4,
+                max_output_tokens=60,
             )
         )
-        instruction_text = response.text.strip()
+        text = response.text.strip().strip('"').strip("'")
+        logger.info(f"LLM response: '{text}'")
         
+        if text.upper() == "SKIP":
+            return {"instruction": None, "skip": True}
+        return {"instruction": text, "skip": False}
+    
     except Exception as e:
-        logger.error(f"LLM Generation Error: {e}")
-        instruction_text = "SKIP"
-
-    return {
-        "instruction": instruction_text
-    }
+        logger.error(f"LLM call failed: {e}")
+        return {"instruction": None, "skip": True}

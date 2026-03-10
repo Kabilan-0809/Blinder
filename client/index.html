@@ -3,323 +3,327 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Blind AI Navigator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Blind Navigator AI</title>
     <style>
-        body {
-            font-family: system-ui, -apple-system, sans-serif;
+        * {
+            box-sizing: border-box;
             margin: 0;
             padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-start;
-            height: 100vh;
-            background-color: #121212;
+            height: 100dvh;
+            background: #0a0a0a;
             color: white;
             overflow: hidden;
         }
 
-        h1 {
-            margin: 1rem 0;
+        header {
+            width: 100%;
+            padding: 0.75rem 1rem;
             text-align: center;
-            font-size: 1.5rem;
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            color: #e0e0e0;
+            background: rgba(255, 255, 255, 0.05);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            flex: 1;
+            overflow: hidden;
+            background: #000;
+        }
+
+        #videoEl {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: relative;
+            z-index: 1;
+        }
+
+        #overlayCanvas {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Status bar overlaid on bottom of video */
+        #statusBar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 20;
+            padding: 0.75rem 1rem;
+            background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+            font-size: 1.05rem;
+            font-weight: 500;
+            min-height: 3rem;
+            display: flex;
+            align-items: flex-end;
+            color: #eee;
         }
 
         .controls {
+            width: 100%;
             display: flex;
-            gap: 1rem;
-            width: 90%;
-            max-width: 400px;
-            margin-bottom: 1rem;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            background: rgba(255, 255, 255, 0.04);
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
         }
 
         button {
             flex: 1;
-            padding: 1.5rem;
-            font-size: 1.5rem;
-            font-weight: bold;
+            padding: 1rem;
+            font-size: 1.2rem;
+            font-weight: 700;
             border: none;
-            border-radius: 12px;
+            border-radius: 10px;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            transition: transform 0.1s, opacity 0.15s;
         }
 
         button:active {
-            transform: scale(0.95);
-        }
-
-        #startBtn {
-            background-color: #4CAF50;
-            color: white;
-        }
-
-        #stopBtn {
-            background-color: #f44336;
-            color: white;
+            transform: scale(0.96);
+            opacity: 0.85;
         }
 
         button:disabled {
-            background-color: #555 !important;
-            opacity: 0.5;
+            opacity: 0.35;
             cursor: not-allowed;
             transform: none;
         }
 
-        #status {
-            font-size: 1.2rem;
-            text-align: center;
-            color: #aaa;
-            margin-bottom: 1rem;
-            min-height: 2em;
-            padding: 0 1rem;
+        #startBtn {
+            background: #22c55e;
+            color: #000;
         }
 
-        .video-container {
-            position: relative;
-            width: 90%;
-            max-width: 640px;
-            aspect-ratio: 4/3;
-            background-color: #000;
-            border-radius: 8px;
-            overflow: hidden;
+        #stopBtn {
+            background: #ef4444;
+            color: #fff;
         }
 
-        /* Visible Video Feed */
-        #videoElement {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-
-        /* Overlay Canvas for Bounding Boxes */
-        #overlayCanvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            /* Let clicks pass through */
-        }
-
-        /* Hidden canvas just for extracting frames */
-        #hiddenCanvas {
+        canvas#hiddenCanvas {
             display: none;
+        }
+
+        /* Alert flash overlay */
+        #alertFlash {
+            display: none;
+            position: absolute;
+            inset: 0;
+            z-index: 30;
+            background: rgba(239, 68, 68, 0.25);
+            pointer-events: none;
+            animation: flash 0.4s ease-out;
+        }
+
+        @keyframes flash {
+            0% {
+                opacity: 1;
+            }
+
+            100% {
+                opacity: 0;
+            }
         }
     </style>
 </head>
 
 <body>
 
-    <h1>Blind Navigator AI</h1>
+    <header>🦯 Blind Navigator AI</header>
+
+    <div class="video-wrapper">
+        <video id="videoEl" autoplay playsinline muted></video>
+        <canvas id="overlayCanvas"></canvas>
+        <div id="statusBar">Ready. Press START.</div>
+        <div id="alertFlash"></div>
+    </div>
 
     <div class="controls">
-        <button id="startBtn">START</button>
-        <button id="stopBtn" disabled>STOP</button>
+        <button id="startBtn">▶ START</button>
+        <button id="stopBtn" disabled>■ STOP</button>
     </div>
 
-    <div id="status">Ready. Press START to begin.</div>
-
-    <div class="video-container">
-        <!-- The user sees this feed natively -->
-        <video id="videoElement" autoplay playsinline></video>
-        <!-- The browser draws bounding boxes here over the feed -->
-        <canvas id="overlayCanvas"></canvas>
-    </div>
-
-    <!-- Used to grab and compress the JPEG behind the scenes -->
     <canvas id="hiddenCanvas"></canvas>
 
     <script>
+        // ─── DOM ──────────────────────────────────────────────────────────────────
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const statusText = document.getElementById('status');
+        const statusBar = document.getElementById('statusBar');
+        const videoEl = document.getElementById('videoEl');
+        const overlay = document.getElementById('overlayCanvas');
+        const overlayCtx = overlay.getContext('2d');
+        const hidden = document.getElementById('hiddenCanvas');
+        const hiddenCtx = hidden.getContext('2d', { willReadFrequently: true });
+        const alertFlash = document.getElementById('alertFlash');
 
-        const video = document.getElementById('videoElement');
-        const overlayCanvas = document.getElementById('overlayCanvas');
-        const overlayCtx = overlayCanvas.getContext('2d');
+        let ws = null, stream = null, intervalId = null, isRunning = false;
 
-        const hiddenCanvas = document.getElementById('hiddenCanvas');
-        const hiddenCtx = hiddenCanvas.getContext('2d', { willReadFrequently: true });
-
-        let ws = null;
-        let stream = null;
-        let intervalId = null;
-        let isRunning = false;
-
-        // --- 1. Initialize Speech Synthesis --- //
+        // ─── TTS ──────────────────────────────────────────────────────────────────
         const synth = window.speechSynthesis;
+        let lastSpeechStartTime = 0;
 
         function speak(text, priority = "scene") {
             if (!text) return;
+            console.log(`[TTS][${priority}] "${text}"`);
 
-            console.log(`[TTS Request] Type: ${priority} | Text: ${text}`);
+            const speechAge = Date.now() - lastSpeechStartTime;
 
             if (priority === "alert") {
-                synth.cancel(); // Instantly override
-            } else if (priority === "scene" && synth.speaking) {
-                console.log("[TTS] Dropped. Already speaking.");
-                return; // Prevent speech queue build up
+                synth.cancel(); // Always interrupt for danger
+            } else {
+                // Only block if speech started LESS than 3s ago (still fresh)
+                if (synth.speaking && speechAge < 3000) {
+                    console.log("[TTS] Skipped — fresh speech in progress.");
+                    return;
+                }
+                if (synth.speaking) synth.cancel(); // Kill stale speech
             }
 
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.rate = 1.1;
-
-            utterance.onstart = () => console.log(`[TTS Playing]: ${text}`);
-
-            synth.speak(utterance);
+            const utt = new SpeechSynthesisUtterance(text);
+            utt.rate = 1.05;
+            utt.pitch = 1.0;
+            utt.volume = 1.0;
+            utt.onstart = () => { lastSpeechStartTime = Date.now(); console.log(`[TTS PLAYING] "${text}"`); };
+            utt.onerror = (e) => console.error("[TTS ERROR]", e);
+            synth.speak(utt);
         }
 
-        // --- 2. Bounding Box Rendering --- //
+        // ─── BOUNDING BOX OVERLAY ─────────────────────────────────────────────────
         function drawOverlay(objects) {
-            // Clear previous boxes
-            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
             if (!objects || objects.length === 0) return;
 
-            // The server extracts coords relative to the 320x240 backend resolution.
-            // We need to scale them up to the native video resolution playing on the screen.
-            const scaleX = overlayCanvas.width / 320.0;
-            const scaleY = overlayCanvas.height / 240.0;
+            // YOLO runs at 640x480; scale to native display resolution
+            const sx = overlay.width / 640;
+            const sy = overlay.height / 480;
 
             objects.forEach(obj => {
                 if (!obj.bbox) return;
-
                 const [x1, y1, x2, y2] = obj.bbox;
+                const rx = x1 * sx, ry = y1 * sy, rw = (x2 - x1) * sx, rh = (y2 - y1) * sy;
 
-                const sx1 = x1 * scaleX;
-                const sy1 = y1 * scaleY;
-                const sx2 = x2 * scaleX;
-                const sy2 = y2 * scaleY;
-                const width = sx2 - sx1;
-                const height = sy2 - sy1;
+                const color = obj.distance > 0.3 ? '#ef4444' : '#22c55e';
+                overlayCtx.strokeStyle = color;
+                overlayCtx.lineWidth = 3;
+                overlayCtx.strokeRect(rx, ry, rw, rh);
 
-                // Draw Box
-                overlayCtx.strokeStyle = '#00FF00'; // Neon Green
-                overlayCtx.lineWidth = 4;
-                overlayCtx.strokeRect(sx1, sy1, width, height);
-
-                // Draw Label Background
-                overlayCtx.fillStyle = '#00FF00';
-                overlayCtx.fillRect(sx1, sy1 - 24, overlayCtx.measureText(obj.type).width + 20, 24);
-
-                // Draw Label Text
-                overlayCtx.fillStyle = '#000000';
-                overlayCtx.font = 'bold 16px Arial';
-                overlayCtx.fillText(`${obj.type} (${obj.distance.toFixed(2)})`, sx1 + 5, sy1 - 6);
+                // Label
+                const label = `${obj.type} ${(obj.distance * 100).toFixed(0)}%`;
+                overlayCtx.font = 'bold 13px system-ui';
+                const tw = overlayCtx.measureText(label).width;
+                overlayCtx.fillStyle = color;
+                overlayCtx.fillRect(rx, ry - 20, tw + 10, 20);
+                overlayCtx.fillStyle = '#000';
+                overlayCtx.fillText(label, rx + 5, ry - 5);
             });
         }
 
-        // --- 3. Main Logic --- //
-        async function startNavigation() {
+        // ─── WEBSOCKET MESSAGE HANDLER ────────────────────────────────────────────
+        function handleMessage(event) {
+            let data;
+            try { data = JSON.parse(event.data); } catch (e) { return; }
+            console.log("[WS RECV]", data.type, data.text || "");
+
+            // Always draw boxes
+            drawOverlay(data.objects || []);
+
+            if (data.type === "alert") {
+                speak(data.text, "alert");
+                statusBar.innerHTML = `⚠️ <span style="color:#f87171">${data.text}</span>`;
+                // Flash red overlay
+                alertFlash.style.display = 'block';
+                alertFlash.style.animation = 'none';
+                requestAnimationFrame(() => {
+                    alertFlash.style.animation = 'flash 0.5s ease-out forwards';
+                });
+                setTimeout(() => { alertFlash.style.display = 'none'; }, 600);
+            } else if (data.type === "scene" && data.text) {
+                speak(data.text, "scene");
+                statusBar.innerHTML = `👁️ ${data.text}`;
+            }
+            // type === "debug" → just update overlay, no TTS
+        }
+
+        // ─── START NAVIGATION ─────────────────────────────────────────────────────
+        async function startNav() {
             try {
                 stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: 640, height: 480 }
+                    video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
                 });
-                video.srcObject = stream;
+                videoEl.srcObject = stream;
 
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                ws = new WebSocket(`${protocol}//${window.location.host}/stream`);
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                ws = new WebSocket(`${protocol}//${location.host}/stream`);
 
                 ws.onopen = () => {
                     isRunning = true;
-                    statusText.textContent = "AI Connected. Listening...";
-                    statusText.style.color = "white";
                     startBtn.disabled = true;
                     stopBtn.disabled = false;
+                    statusBar.innerHTML = '🟢 AI connected. Scanning…';
+                    speak("Navigation started.", "alert");
 
-                    speak("System started.", "alert");
-
-                    video.onloadedmetadata = () => {
-                        // Native resolution
-                        hiddenCanvas.width = video.videoWidth;
-                        hiddenCanvas.height = video.videoHeight;
-
-                        // Overlay resolution needs to exactly match video internal Res to draw accurately
-                        overlayCanvas.width = video.videoWidth;
-                        overlayCanvas.height = video.videoHeight;
-
+                    videoEl.onloadedmetadata = () => {
+                        hidden.width = videoEl.videoWidth;
+                        hidden.height = videoEl.videoHeight;
+                        overlay.width = videoEl.videoWidth;
+                        overlay.height = videoEl.videoHeight;
                         intervalId = setInterval(sendFrame, 250);
                     };
                 };
 
-                ws.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        console.log("WebSocket Recv:", data);
-
-                        // 1. Draw debug info on screen
-                        if (data.objects) {
-                            drawOverlay(data.objects);
-                        }
-
-                        // 2. Read instruction aloud via TTS
-                        if (data.text) {
-                            speak(data.text, data.type);
-
-                            if (data.type === "alert") {
-                                statusText.innerHTML = `⚠️ <span style="color:#f44336">${data.text}</span>`;
-                            } else {
-                                statusText.innerHTML = `👁️ <span style="color:#4CAF50">${data.text}</span>`;
-                            }
-                        }
-
-                    } catch (e) {
-                        console.error("Failed to parse response", e);
-                    }
-                };
-
-                ws.onerror = (error) => {
-                    console.error('WebSocket Error:', error);
-                    stopNavigation("Connection error.");
-                };
-
-                ws.onclose = () => {
-                    if (isRunning) stopNavigation("Disconnected from server.");
-                };
+                ws.onmessage = handleMessage;
+                ws.onerror = () => stopNav("Connection error.");
+                ws.onclose = () => { if (isRunning) stopNav("Disconnected."); };
 
             } catch (err) {
-                console.error("Error accessing camera:", err);
-                statusText.textContent = "Error: Camera access denied or unavailable.";
-                speak("Error. Cannot access camera.", "alert");
+                console.error(err);
+                statusBar.textContent = "Camera access denied.";
+                speak("Error. Camera access denied.", "alert");
             }
         }
 
+        // ─── SEND FRAME ───────────────────────────────────────────────────────────
         function sendFrame() {
             if (!isRunning || ws.readyState !== WebSocket.OPEN) return;
-
-            // Draw current video frame to hidden canvas to grab the JPEG
-            hiddenCtx.drawImage(video, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
-
-            hiddenCanvas.toBlob((blob) => {
-                if (blob) {
-                    ws.send(blob);
-                }
-            }, 'image/jpeg', 0.5);
+            hiddenCtx.drawImage(videoEl, 0, 0, hidden.width, hidden.height);
+            hidden.toBlob(blob => { if (blob) ws.send(blob); }, 'image/jpeg', 0.65);
         }
 
-        function stopNavigation(msg = "Navigation stopped.") {
+        // ─── STOP NAVIGATION ──────────────────────────────────────────────────────
+        function stopNav(msg = "Stopped.") {
             isRunning = false;
-
-            if (intervalId) clearInterval(intervalId);
-            if (stream) stream.getTracks().forEach(track => track.stop());
-            if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-
-            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-
+            clearInterval(intervalId);
+            stream?.getTracks().forEach(t => t.stop());
+            if (ws?.readyState === WebSocket.OPEN) ws.close();
+            overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
             synth.cancel();
             speak(msg, "alert");
-
             startBtn.disabled = false;
             stopBtn.disabled = true;
-            statusText.textContent = "Ready. Press START to begin.";
-            statusText.style.color = "#aaa";
+            statusBar.textContent = "Ready. Press START.";
         }
 
-        startBtn.addEventListener('click', startNavigation);
-        stopBtn.addEventListener('click', () => stopNavigation());
+        startBtn.addEventListener('click', startNav);
+        stopBtn.addEventListener('click', () => stopNav());
     </script>
 </body>
 
