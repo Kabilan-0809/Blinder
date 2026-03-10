@@ -15,6 +15,7 @@ from safety_engine import run_safety_engine
 from navigation_engine import generate_navigation_instruction
 from memory import update_session
 from terrain_analyzer import analyze_terrain
+from path_planner import analyze_free_space, determine_safe_direction
 
 logger = logging.getLogger("blind_ai_robotics")
 
@@ -65,8 +66,12 @@ async def stream(ws: WebSocket):
                 instruction = safety_override
                 logger.warning(f"[HARD SAFETY] → {instruction}")
             else:
+                # ── STAGE 4.5: Walkable Path Detection ──────────────────────
+                zone_clearance = analyze_free_space(objects_info, depth_map)
+                path_recommendation = determine_safe_direction(zone_clearance)
+                
                 # ── STAGE 5: Semantic Reasoning Engine ──────────────────────
-                scene_json = build_scene(objects_info, terrain_hazards)
+                scene_json = build_scene(objects_info, terrain_hazards, path_recommendation)
                 
                 # Asynchronously call the reasoning engine so we don't block
                 # the 2fps safety check loop
