@@ -1,50 +1,25 @@
-import time
-
-# Redis-ready dictionary. Each session_id maps to state.
 sessions = {}
 
 def get_session(session_id: str) -> dict:
     if session_id not in sessions:
         sessions[session_id] = {
-            "history": [],            # Rolling list of last 5 spoken instructions
-            "last_spoken_time": 0.0,  # When we last actually SPOKE something
-            "last_object_types": set(), # Object type set from last spoken frame
-            "is_first": True,          # First instruction of the session?
+            "last_instruction": "",
+            "last_scene_summary": "",
+            "recent_obstacles": []
         }
     return sessions[session_id]
 
-def scene_has_changed(session_id: str, objects_info: list) -> bool:
+def update_session(session_id: str, instruction: str, scene_summary: str, objects_info: list):
     """
-    Returns True if the scene has meaningfully changed since the last spoken instruction.
-    We compare the SET of object types, not exact positions (positions fluctuate per frame).
+    Updates the session memory with the results of the current frame so the
+    navigation engine can avoid repetitive instructions.
     """
     state = get_session(session_id)
-    current_types = set(o["type"] for o in objects_info)
-    last_types = state["last_object_types"]
     
-    # New objects appeared or old ones disappeared
-    if current_types != last_types:
-        return True
+    state["last_instruction"] = instruction
+    state["last_scene_summary"] = scene_summary
     
-    return False
-
-def is_within_cooldown(session_id: str, cooldown_secs: float = 2.5) -> bool:
-    """Returns True if we spoke recently and should be quiet."""
-    state = get_session(session_id)
-    return (time.time() - state["last_spoken_time"]) < cooldown_secs
-
-def update_session(session_id: str, instruction: str, objects_info: list):
-    """Record a spoken instruction."""
-    state = get_session(session_id)
+    # Track the unique classes of objects recently encountered
+    state["recent_obstacles"] = list(set([o["type"] for o in objects_info]))
     
-    state["history"].append({
-        "instruction": instruction,
-        "time": time.time(),
-    })
-    if len(state["history"]) > 5:
-        state["history"].pop(0)
-    
-    state["last_spoken_time"] = time.time()
-    state["last_object_types"] = set(o["type"] for o in objects_info)
-    state["is_first"] = False
     sessions[session_id] = state
