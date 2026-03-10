@@ -6,6 +6,10 @@ import cv2
 import json
 import asyncio
 import time
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logger = logging.getLogger("blind_ai_pipeline")
 
 import sys
 import os
@@ -58,14 +62,14 @@ async def stream(ws: WebSocket):
             )
 
             # 1. Vision Processing (Resize & object extraction)
-            print(f"[pipeline] Processing frame at {current_time}...")
+            logger.info(f"Processing frame at {current_time}...")
             objects_info = process_frame(frame)
-            print(f"[vision] Extracted {len(objects_info)} objects.")
+            logger.info(f"Vision extracted {len(objects_info)} objects.")
             
             # 2. Priority Danger Evaluation (<1m)
             danger_alert = check_immediate_danger(objects_info)
             if danger_alert:
-                print(f"[danger] HIGH PRIORITY ALERT TRIGGERED: {danger_alert['instruction']}")
+                logger.warning(f"HIGH PRIORITY ALERT TRIGGERED: {danger_alert['instruction']}")
                 await ws.send_text(json.dumps({
                     "type": "alert",
                     "text": danger_alert["instruction"],
@@ -80,24 +84,27 @@ async def stream(ws: WebSocket):
             state = get_session(session_id)
             instruction_map = generate_guidance(scene_json, state)
             instruction_text = instruction_map["instruction"]
-            print(f"[llm] Generated guidance: '{instruction_text}'")
+            logger.info(f"Generated guidance: '{instruction_text}'")
             
-            # 5. Deduplication
-            if instruction_text == state.get("last_instruction"):
-                # Scene or LLM conclusion hasn't changed enough to warrant re-speaking
-                print("[memory] Scene/instruction identical to last. Deduplicating (not speaking).")
+            # 5. Semantic Deduplication
+            if instruction_text == "SKIP" or instruction_text == state.get("last_instruction"):
+                # Semantic logic decided user already knows this, skip TTS
+                logger.info("Semantic deduplication triggered. Instruction skipped.")
                 await ws.send_text(json.dumps({
                     "type": "debug",
                     "objects": objects_info 
                 }))
+                
+                # We still update state to keep memory flowing with the silent scene
+                update_session(session_id, "Silently observed scene.", scene_json, objects_info)
                 continue
                 
             # Update Redis-ready context 
             update_session(session_id, instruction_text, scene_json, objects_info)
-            print("[memory] Session state updated.")
+            logger.info("Session state updated.")
             
             # Return final guidance
-            print(f"[websocket] Sending instruction payload to client.")
+            logger.info("Sending instruction payload to client.")
             await ws.send_text(json.dumps({
                 "type": "scene",
                 "text": instruction_text,
@@ -105,4 +112,4 @@ async def stream(ws: WebSocket):
             }))
             
     except WebSocketDisconnect:
-        print(f"Client {session_id} disconnected.")
+        logger.info(f"Client {session_id} disconnected.")

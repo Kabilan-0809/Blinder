@@ -1,11 +1,13 @@
 import cv2
+import logging
 from ultralytics import YOLO
 
+logger = logging.getLogger(__name__)
 model = YOLO("yolov8n.pt")
 
 def process_frame(frame):
-    # Enforce 320x240 resolution to guarantee < 300ms latency on low end edge devices
-    frame = cv2.resize(frame, (320, 240))
+    # Process at higher 640x480 resolution to vastly improve object detection accuracy
+    frame = cv2.resize(frame, (640, 480))
     
     results = model(frame)
     height, width, _ = frame.shape
