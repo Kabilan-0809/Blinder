@@ -3,9 +3,17 @@ sessions = {}
 def get_session(session_id: str) -> dict:
     if session_id not in sessions:
         sessions[session_id] = {
+            # Vision pipeline state
             "last_instruction": "",
             "last_scene_summary": "",
-            "recent_obstacles": []
+            "recent_obstacles": [],
+            # Route navigation state
+            "route_steps": [],
+            "current_route_step": 0,
+            "distance_to_next_turn": None,
+            "last_nav_distance_announced": None,
+            # GPS
+            "last_location": None
         }
     return sessions[session_id]
 
