@@ -202,6 +202,8 @@ async def stream(ws: WebSocket):
                 # ── GUIDANCE — max 1 per 4 seconds while goal is active ───────
                 if task_status == "active" and goal and (now - last_guide_time > 4.0):
                     logger.info("💬  [GUIDE] Generating navigation guidance...")
+                    # Update rate limit timer IMMEDIATELY to prevent infinite loop on 429s
+                    last_guide_time = now 
                     t_guide = time.time()
                     guidance = await asyncio.to_thread(
                         generate_guidance, session_id, vision_description
@@ -209,7 +211,6 @@ async def stream(ws: WebSocket):
                     guide_ms = (time.time() - t_guide) * 1000
                     if guidance:
                         add_turn(session_id, "assistant", guidance)
-                        last_guide_time = now
                         logger.info(f"💬  [GUIDE] ({guide_ms:.0f}ms): '{guidance}'")
                         await ws.send_text(json.dumps({
                             "type": "response",
@@ -217,7 +218,7 @@ async def stream(ws: WebSocket):
                             "vision": vision_description or ""
                         }))
                     else:
-                        logger.info(f"💬  [GUIDE] Skipped (rate limited or no change, {guide_ms:.0f}ms)")
+                        logger.info(f"💬  [GUIDE] Skipped or failed (rate limited, {guide_ms:.0f}ms)")
 
             # ────────────────────────────────────────────────────────────────
             # TYPE: GPS — location update
