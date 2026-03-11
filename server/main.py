@@ -3,11 +3,21 @@ sys.path.append(os.path.dirname(__file__))
 
 import logging
 
-# Central logging configuration for the entire robotics pipeline
+# ── Rich terminal logging with clear visual markers per subsystem ─────────────
+# Format: TIME  LEVEL  MODULE: emoji message
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s  %(levelname)-8s  %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 
-# Export the FastAPI app from the new modular autonomous router
+# Suppress noisy third-party loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("multipart").setLevel(logging.WARNING)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+
+# Export the FastAPI app
 from websocket_server import app
