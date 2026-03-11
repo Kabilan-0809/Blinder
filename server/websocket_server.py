@@ -146,15 +146,16 @@ async def stream(ws: WebSocket):
                     continue
 
                 # ── SAFETY CHECK — runs on every frame, always ───────────────
-                t_safe = time.time()
-                safety_alert = await asyncio.to_thread(run_safety_check, jpeg_bytes)
-                safe_ms = (time.time() - t_safe) * 1000
-                if safety_alert:
-                    logger.warning(f"🚨  [SAFETY] {safety_alert}  ({safe_ms:.0f}ms)")
-                    await ws.send_text(json.dumps({"type": "safety", "text": safety_alert}))
-                    continue   # Don't run vision/guidance when there's a danger
-                else:
-                    logger.info(f"✅  [SAFETY] Clear ({safe_ms:.0f}ms)")
+                # [DISABLED FOR CONVERSATION TESTING]
+                # t_safe = time.time()
+                # safety_alert = await asyncio.to_thread(run_safety_check, jpeg_bytes)
+                # safe_ms = (time.time() - t_safe) * 1000
+                # if safety_alert:
+                #     logger.warning(f"🚨  [SAFETY] {safety_alert}  ({safe_ms:.0f}ms)")
+                #     await ws.send_text(json.dumps({"type": "safety", "text": safety_alert}))
+                #     continue   # Don't run vision/guidance when there's a danger
+                # else:
+                #     logger.info(f"✅  [SAFETY] Clear ({safe_ms:.0f}ms)")
 
                 now = time.time()
                 goal = mem.get("current_goal")
