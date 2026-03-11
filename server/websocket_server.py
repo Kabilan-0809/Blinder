@@ -1,185 +1,227 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-import numpy as np
-import cv2
 import json
 import time
 import asyncio
 import logging
 
-from perception import process_frame
-from depth_estimator import estimate_depth
-from scene_builder import build_scene
-from safety_engine import run_safety_engine
-from navigation_engine import generate_navigation_instruction
-from memory import get_session, update_session
-from terrain_analyzer import analyze_terrain
-from path_planner import analyze_free_space, determine_safe_direction
+from speech_to_text import transcribe_audio
+from task_manager import extract_task
+from vision_reasoning import analyze_frame
+from environment_memory import (
+    get_memory, set_goal, add_observation, add_turn,
+    complete_goal, pause_task, resume_task
+)
+from conversation_engine import generate_guidance, answer_question
+from safety_detector import run_safety_check
 from route_navigation import load_route, get_next_navigation_step
-from guidance_engine import fuse_guidance
 
-logger = logging.getLogger("blind_ai_robotics")
+logger = logging.getLogger("blind_ai_conv")
 
 app = FastAPI()
 app.mount("/app", StaticFiles(directory="client", html=True), name="client")
 
 @app.get("/")
 async def root():
-    return HTMLResponse("<h1>Blind Navigation System (Robotics Grade)</h1><p><a href='/app'>Open App</a></p>")
+    return HTMLResponse("<h1>Blind Navigation AI — Conversational Mode</h1><p><a href='/app'>Open App</a></p>")
 
-# ── HTTP REST endpoint: load a Google Maps route ────────────────────────────
-@app.post("/route/load")
-async def api_load_route(payload: dict):
-    """
-    Called once by the client to set a navigation destination.
-    Payload: {"session_id": "...", "start": {"lat":x, "lng":y}, "destination": "Eiffel Tower, Paris"}
-    """
-    session_id = payload.get("session_id", "default")
-    session_state = get_session(session_id)
-    
-    ok = load_route(
-        start_location=payload["start"],
-        destination=payload["destination"],
-        session_state=session_state
-    )
-    if ok:
-        return {"status": "ok", "steps": len(session_state["route_steps"])}
-    return {"status": "error", "message": "Failed to load route. Check GOOGLE_MAPS_API_KEY."}
-
-
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN WEBSOCKET
+# Message types from client:
+#   {"type": "audio",  "data": "<base64 webm>"}    → STT → task extraction
+#   {"type": "frame",  "data": "<base64 JPEG>"}    → safety + vision reasoning
+#   {"type": "gps",    "lat": x, "lng": y}         → GPS navigation
+#   {"type": "route",  "start": {...}, "destination": "..."} → load a route
+# ─────────────────────────────────────────────────────────────────────────────
 @app.websocket("/stream")
 async def stream(ws: WebSocket):
     await ws.accept()
     session_id = ws.client.host
     logger.info(f"[CONNECT] Session: {session_id}")
-    
-    last_frame_time = 0.0
-    
+
+    last_vision_time = 0.0   # Rate limit vision calls (max 1 per 2 seconds)
+    last_guide_time  = 0.0   # Rate limit guidance calls (max 1 per 4 seconds)
+
     try:
         while True:
-            # ── DUAL MESSAGE HANDLING ──────────────────────────────────────
-            # The WebSocket receives two types of messages:
-            #   1. Binary JPEG bytes → camera frame for vision processing
-            #   2. JSON Text string  → {"lat": x, "lng": y} GPS update
-            #
-            # We use receive() to detect the type dynamically.
             message = await ws.receive()
-            state = get_session(session_id)
-            
-            # ── GPS LOCATION UPDATE (text frame) ────────────────────────
-            if "text" in message:
+
+            # ── Graceful disconnect ──────────────────────────────────────────
+            if message.get("type") == "websocket.disconnect":
+                logger.info(f"[DISCONNECT] {session_id}")
+                break
+
+            raw = message.get("text") or ""
+            if not raw:
+                # Binary frame — not expected in new architecture (all base64 over JSON)
+                continue
+
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                logger.warning("[WS] Could not parse payload as JSON")
+                continue
+
+            msg_type = payload.get("type")
+            mem = get_memory(session_id)
+
+            # ────────────────────────────────────────────────────────────────
+            # TYPE: AUDIO — user pressed STOP after speaking
+            # ────────────────────────────────────────────────────────────────
+            if msg_type == "audio":
+                audio_b64 = payload.get("data", "")
+                if not audio_b64:
+                    continue
+
+                # Run STT in background thread (Whisper is CPU-bound)
+                transcript = await asyncio.to_thread(transcribe_audio, audio_b64)
+                if not transcript:
+                    await ws.send_text(json.dumps({"type": "error", "text": "Sorry, I didn't catch that."}))
+                    continue
+
+                logger.info(f"[USER] '{transcript}'")
+
+                # Extract task/intent
+                task = await asyncio.to_thread(extract_task, transcript)
+                intent = task.get("intent", "unknown")
+
+                if intent == "navigate":
+                    goal = task.get("goal", transcript)
+                    set_goal(session_id, goal)
+                    add_turn(session_id, "user", transcript)
+                    reply = f"Got it! I'll guide you to {goal}. Please show me the surroundings."
+                    add_turn(session_id, "assistant", reply)
+                    logger.info(f"[TASK] Goal set: {goal}")
+
+                elif intent == "query":
+                    question = task.get("question", transcript)
+                    pause_task(session_id, question)
+                    add_turn(session_id, "user", transcript)
+                    # Will be answered on the next frame
+                    reply = "Let me look..."
+                    add_turn(session_id, "assistant", reply)
+
+                elif intent == "interrupt":
+                    new_req = task.get("new_request", transcript)
+                    pause_task(session_id, new_req)
+                    add_turn(session_id, "user", transcript)
+                    reply = "Sure, hold on."
+                    add_turn(session_id, "assistant", reply)
+
+                else:
+                    # Unknown — treat as navigation goal
+                    set_goal(session_id, transcript)
+                    add_turn(session_id, "user", transcript)
+                    reply = f"I'll try to help with that."
+                    add_turn(session_id, "assistant", reply)
+
+                await ws.send_text(json.dumps({
+                    "type": "response",
+                    "text": reply,
+                    "transcript": transcript,
+                    "intent": intent
+                }))
+
+            # ────────────────────────────────────────────────────────────────
+            # TYPE: FRAME — camera image
+            # ────────────────────────────────────────────────────────────────
+            elif msg_type == "frame":
+                import base64
+                frame_b64 = payload.get("data", "")
+                if not frame_b64:
+                    continue
+
                 try:
-                    payload = json.loads(message["text"])
-                    
-                    # Route load request coming from client
-                    if "destination" in payload:
-                        ok = load_route(
-                            start_location=payload["start"],
-                            destination=payload["destination"],
-                            session_state=state
-                        )
-                        await ws.send_text(json.dumps({
-                            "type": "route_loaded",
-                            "ok": ok,
-                            "steps": len(state.get("route_steps", []))
-                        }))
-                        continue
-                    
-                    # Live GPS location update
-                    if "lat" in payload and "lng" in payload:
-                        user_location = {"lat": payload["lat"], "lng": payload["lng"]}
-                        state["last_location"] = user_location
-                        
-                        nav_instruction = get_next_navigation_step(user_location, state)
-                        
-                        if nav_instruction:
-                            logger.info(f"[GPS NAV] → {nav_instruction}")
+                    jpeg_bytes = base64.b64decode(frame_b64)
+                except Exception:
+                    continue
+
+                # ── SAFETY CHECK — runs on every frame, always ───────────────
+                safety_alert = await asyncio.to_thread(run_safety_check, jpeg_bytes)
+                if safety_alert:
+                    logger.warning(f"[SAFETY] → {safety_alert}")
+                    await ws.send_text(json.dumps({"type": "safety", "text": safety_alert}))
+                    continue   # Don't run vision/guidance when there's a danger
+
+                now = time.time()
+                goal = mem.get("current_goal")
+                task_status = mem.get("task_status", "idle")
+
+                # ── VISION REASONING — max 1 per 2 seconds ───────────────────
+                vision_description = None
+                if now - last_vision_time > 2.0 and goal:
+                    vision_description = await asyncio.to_thread(
+                        analyze_frame, jpeg_bytes, goal
+                    )
+                    last_vision_time = now
+
+                    if vision_description and vision_description != "UNCLEAR":
+                        add_observation(session_id, vision_description)
+
+                        # Check goal completion by seeing if goal string appears in vision
+                        if goal and goal.lower() in vision_description.lower():
+                            complete_goal(session_id)
+                            reply = f"You've reached {goal}!"
+                            add_turn(session_id, "assistant", reply)
                             await ws.send_text(json.dumps({
-                                "type": "navigation",
-                                "text": nav_instruction,
-                                "distance_to_turn": state.get("distance_to_next_turn"),
-                                "step": state.get("current_route_step", 0)
+                                "type": "response",
+                                "text": reply,
+                                "vision": vision_description
                             }))
-                except Exception as e:
-                    logger.warning(f"[GPS] Could not parse text payload: {e}")
-                    
-                continue  # Don't run vision on GPS frames
+                            continue
 
-            # ── CAMERA FRAME PROCESSING (binary frame) ────────────────────────
-            if "bytes" not in message:
-                continue
+                # ── ANSWER PENDING QUESTION ───────────────────────────────────
+                pending_q = mem.get("pending_question")
+                if pending_q and vision_description:
+                    reply = await asyncio.to_thread(
+                        answer_question, session_id, pending_q, vision_description
+                    )
+                    add_turn(session_id, "assistant", reply)
+                    resume_task(session_id)
+                    await ws.send_text(json.dumps({"type": "response", "text": reply}))
+                    last_guide_time = now
+                    continue
 
-            # Enforce 2fps architecture (500ms intervals)
-            now = time.time()
-            if now - last_frame_time < 0.5:
-                continue
-            last_frame_time = now
-            
-            frame = cv2.imdecode(np.frombuffer(message["bytes"], np.uint8), cv2.IMREAD_COLOR)
-            if frame is None:
-                continue
-                
-            start_t = time.time()
-            
-            # ── STAGE 1 & 2: Frame Ingestion & Perception Module ───────────
-            objects_info, resized_frame = process_frame(frame)
-            
-            # ── STAGE 3: Depth Estimation (MiDaS) ──────────────────────────
-            objects_info, depth_map = estimate_depth(resized_frame, objects_info)
-            
-            # ── STAGE 3.5: Terrain Hazard Detection ────────────────────────
-            terrain_hazards = analyze_terrain(depth_map)
-            
-            # ── STAGE 4: Hardware-Level Safety Check ───────────────────────
-            safety_alert = run_safety_engine(objects_info, terrain_hazards)
-            
-            # ── STAGE 4.5: Walkable Path Detection ──────────────────────────
-            vision_instruction = None
-            if not safety_alert:
-                zone_clearance = analyze_free_space(objects_info, depth_map)
-                path_recommendation = determine_safe_direction(zone_clearance)
-                
-                # ── STAGE 5: Semantic Reasoning Engine ──────────────────────
-                scene_json = build_scene(objects_info, terrain_hazards, path_recommendation)
-                
-                # Asynchronously call the reasoning engine so we don't block
-                # the 2fps safety check loop
-                result = await asyncio.to_thread(
-                    generate_navigation_instruction, 
-                    session_id, 
-                    scene_json
+                # ── GUIDANCE — max 1 per 4 seconds while goal is active ───────
+                if task_status == "active" and goal and (now - last_guide_time > 4.0):
+                    guidance = await asyncio.to_thread(
+                        generate_guidance, session_id, vision_description
+                    )
+                    if guidance:
+                        add_turn(session_id, "assistant", guidance)
+                        last_guide_time = now
+                        await ws.send_text(json.dumps({
+                            "type": "response",
+                            "text": guidance,
+                            "vision": vision_description or ""
+                        }))
+
+            # ────────────────────────────────────────────────────────────────
+            # TYPE: GPS — location update
+            # ────────────────────────────────────────────────────────────────
+            elif msg_type == "gps":
+                lat, lng = payload.get("lat"), payload.get("lng")
+                if lat and lng:
+                    mem["last_location"] = {"lat": lat, "lng": lng}
+                    nav = get_next_navigation_step({"lat": lat, "lng": lng}, mem)
+                    if nav:
+                        await ws.send_text(json.dumps({"type": "navigation", "text": nav}))
+
+            # ────────────────────────────────────────────────────────────────
+            # TYPE: ROUTE — load a Google Maps route into session
+            # ────────────────────────────────────────────────────────────────
+            elif msg_type == "route":
+                ok = await asyncio.to_thread(
+                    load_route, payload.get("start"), payload.get("destination"), mem
                 )
-                vision_instruction = result.get("instruction")
-                
-                if vision_instruction:
-                    update_session(session_id, vision_instruction, scene_json, objects_info)
-                    logger.info(f"[VISION] → {vision_instruction}")
-
-            # ── STAGE 6: GPS Route Step (last known state from GPS updates) ─
-            nav_instruction = None
-            if state.get("last_location") and state.get("route_steps"):
-                nav_instruction = get_next_navigation_step(state["last_location"], state)
-                
-            # ── STAGE 7: Guidance Fusion ─────────────────────────────────
-            fused = fuse_guidance(safety_alert, vision_instruction, nav_instruction)
-            
-            end_t = time.time()
-            latency = (end_t - start_t) * 1000
-            
-            if latency > 300:
-                logger.warning(f"Pipeline latency violated: {latency:.1f}ms")
-            else:
-                logger.info(f"Pipeline latency: {latency:.1f}ms")
-                
-            # Always send the full fused result on every camera frame
-            await ws.send_text(json.dumps({
-                "type": "scene",
-                "instruction": fused["instruction"],
-                "navigation": fused["navigation"],
-                "objects": objects_info,
-                "terrain_hazards": terrain_hazards
-            }))
+                await ws.send_text(json.dumps({
+                    "type": "route_loaded",
+                    "ok": ok,
+                    "steps": len(mem.get("route_steps", []))
+                }))
 
     except WebSocketDisconnect:
-        logger.info(f"[DISCONNECT] Session: {session_id}")
+        logger.info(f"[DISCONNECT] {session_id}")
+    except Exception as e:
+        logger.error(f"[WS ERROR] {e}")
