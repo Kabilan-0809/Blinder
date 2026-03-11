@@ -1,0 +1,7 @@
+{
+  "python.defaultInterpreterPath": "C:\\Blind_AI\\venv\\Scripts\\python.exe",
+  "python.analysis.extraPaths": [
+    "C:\\Blind_AI\\server"
+  ],
+  "python.analysis.typeCheckingMode": "off"
+}
