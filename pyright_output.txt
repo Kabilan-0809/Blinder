@@ -1,0 +1,36 @@
+﻿c:\Blind_AI\server\conversation_engine.py
+  c:\Blind_AI\server\conversation_engine.py:64:31 - error: "strip" is not a known attribute of "None" (reportOptionalMemberAccess)
+  c:\Blind_AI\server\conversation_engine.py:102:31 - error: "strip" is not a known attribute of "None" (reportOptionalMemberAccess)
+  c:\Blind_AI\server\conversation_engine.py:137:31 - error: "strip" is not a known attribute of "None" (reportOptionalMemberAccess)
+c:\Blind_AI\server\depth_estimator.py
+  c:\Blind_AI\server\depth_estimator.py:2:8 - error: Import "cv2" could not be resolved (reportMissingImports)
+  c:\Blind_AI\server\depth_estimator.py:13:7 - error: Cannot access attribute "to" for class "object"
+  ┬á┬áAttribute "to" is unknown (reportAttributeAccessIssue)
+  c:\Blind_AI\server\depth_estimator.py:14:7 - error: Cannot access attribute "eval" for class "object"
+  ┬á┬áAttribute "eval" is unknown (reportAttributeAccessIssue)
+  c:\Blind_AI\server\depth_estimator.py:17:30 - error: Cannot access attribute "small_transform" for class "object"
+  ┬á┬áAttribute "small_transform" is unknown (reportAttributeAccessIssue)
+  c:\Blind_AI\server\depth_estimator.py:30:22 - error: Object of type "object" is not callable
+  ┬á┬áAttribute "__call__" is unknown (reportCallIssue)
+c:\Blind_AI\server\safety_detector.py
+  c:\Blind_AI\server\safety_detector.py:1:8 - error: Import "cv2" could not be resolved (reportMissingImports)
+  c:\Blind_AI\server\safety_detector.py:4:6 - error: Import "ultralytics" could not be resolved (reportMissingImports)
+c:\Blind_AI\server\speech_to_text.py
+  c:\Blind_AI\server\speech_to_text.py:1:8 - error: Import "whisper" could not be resolved (reportMissingImports)
+  c:\Blind_AI\server\speech_to_text.py:45:23 - error: "tmp_path" is possibly unbound (reportPossiblyUnboundVariable)
+c:\Blind_AI\server\task_manager.py
+  c:\Blind_AI\server\task_manager.py:47:29 - error: Argument of type "str | None" cannot be assigned to parameter "s" of type "str | bytes | bytearray" in function "loads"
+  ┬á┬áType "str | None" is not assignable to type "str | bytes | bytearray"
+  ┬á┬á┬á┬áType "None" is not assignable to type "str | bytes | bytearray"
+  ┬á┬á┬á┬á┬á┬á"None" is not assignable to "str"
+  ┬á┬á┬á┬á┬á┬á"None" is not assignable to "bytes"
+  ┬á┬á┬á┬á┬á┬á"None" is not assignable to "bytearray" (reportArgumentType)
+c:\Blind_AI\server\vision_reasoning.py
+  c:\Blind_AI\server\vision_reasoning.py:41:39 - error: Expected 0 positional arguments (reportCallIssue)
+  c:\Blind_AI\server\vision_reasoning.py:45:37 - error: "strip" is not a known attribute of "None" (reportOptionalMemberAccess)
+c:\Blind_AI\server\websocket_server.py
+  c:\Blind_AI\server\websocket_server.py:40:28 - error: "host" is not a known attribute of "None" (reportOptionalMemberAccess)
+  c:\Blind_AI\server\websocket_server.py:208:56 - error: Argument of type "str | None" cannot be assigned to parameter "latest_observation" of type "str"
+  ┬á┬áType "str | None" is not assignable to type "str"
+  ┬á┬á┬á┬á"None" is not assignable to "str" (reportArgumentType)
+17 errors, 0 warnings, 0 informations

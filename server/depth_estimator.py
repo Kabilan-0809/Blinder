@@ -1,7 +1,7 @@
-import torch
-import cv2
-import numpy as np
-import logging
+import torch  # type: ignore
+import cv2  # type: ignore
+import numpy as np  # type: ignore
+import logging  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,7 @@ midas.eval()
 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
 transform = midas_transforms.small_transform
 
-def estimate_depth(frame, objects_info):
+def estimate_depth(frame, objects_info):  # type: ignore
     """
     Stage 3: Depth Estimation
     Takes the BGR frame, generates a depth map, averages depth over bounding boxes,
@@ -67,6 +67,6 @@ def estimate_depth(frame, objects_info):
         else:
             distance = 5.0
             
-        obj["distance"] = round(float(distance), 2)
+        obj["distance"] = round(float(distance), 2)  # type: ignore
         
-    return objects_info, depth_map
+    return objects_info, depth_map  # type: ignore

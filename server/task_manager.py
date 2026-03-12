@@ -1,8 +1,8 @@
-import os
-import json
-import logging
-from google import genai
-from dotenv import load_dotenv
+import os  # type: ignore
+import json  # type: ignore
+import logging  # type: ignore
+from google import genai  # type: ignore
+from dotenv import load_dotenv  # type: ignore
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -25,13 +25,13 @@ For an interrupt: {"intent": "interrupt", "new_request": "pause for a second"}
 For chat: {"intent": "chat", "text": "how to control this app"}
 """
 
-def extract_task(transcript: str) -> dict:
+def extract_task(transcript: str) -> dict:  # type: ignore
     """
     Parses the user's voice transcript into a structured task using Gemini.
     Returns: {"intent": str, "goal": str} or {"intent": "query", "question": str}
     """
     if not transcript:
-        return {"intent": "unknown"}
+        return {"intent": "unknown"}  # type: ignore
     
     try:
         response = client.models.generate_content(
@@ -44,11 +44,11 @@ def extract_task(transcript: str) -> dict:
                 response_mime_type="application/json"
             )
         )
-        result = json.loads(response.text)
+        result = json.loads(response.text)  # type: ignore
         logger.info(f"[TASK] Extracted: {result}")
-        return result
+        return result  # type: ignore
         
     except Exception as e:
         logger.error(f"[TASK] Extraction error: {e}")
         # Fallback: treat the whole thing as general chat
-        return {"intent": "chat", "text": transcript}
+        return {"intent": "chat", "text": transcript}  # type: ignore

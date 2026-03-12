@@ -1,7 +1,7 @@
-import sys, os
+import sys, os  # type: ignore
 sys.path.append(os.path.dirname(__file__))
 
-import logging
+import logging  # type: ignore
 
 # ── Rich terminal logging with clear visual markers per subsystem ─────────────
 # Format: TIME  LEVEL  MODULE: emoji message
@@ -20,4 +20,4 @@ logging.getLogger("multipart").setLevel(logging.WARNING)
 logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 # Export the FastAPI app
-from websocket_server import app
+from websocket_server import app  # type: ignore

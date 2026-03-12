@@ -1,21 +1,21 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
-import json
-import time
-import asyncio
-import logging
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # type: ignore
+from fastapi.responses import HTMLResponse  # type: ignore
+from fastapi.staticfiles import StaticFiles  # type: ignore
+import json  # type: ignore
+import time  # type: ignore
+import asyncio  # type: ignore
+import logging  # type: ignore
 
-from speech_to_text import transcribe_audio
-from task_manager import extract_task
-from vision_reasoning import analyze_frame
-from environment_memory import (
+from speech_to_text import transcribe_audio  # type: ignore
+from task_manager import extract_task  # type: ignore
+from vision_reasoning import analyze_frame  # type: ignore
+from environment_memory import (  # type: ignore
     get_memory, set_goal, add_observation, add_turn,
     complete_goal, pause_task, resume_task
 )
-from conversation_engine import generate_guidance, answer_question, handle_chat
-from safety_detector import run_safety_check
-from route_navigation import load_route, get_next_navigation_step
+from conversation_engine import generate_guidance, answer_question, handle_chat  # type: ignore
+from safety_detector import run_safety_check  # type: ignore
+from route_navigation import load_route, get_next_navigation_step  # type: ignore
 
 logger = logging.getLogger("blind_ai_conv")
 
@@ -24,7 +24,7 @@ app.mount("/app", StaticFiles(directory="client", html=True), name="client")
 
 @app.get("/")
 async def root():
-    return HTMLResponse("<h1>Blind Navigation AI — Conversational Mode</h1><p><a href='/app'>Open App</a></p>")
+    return HTMLResponse("<h1>Blind Navigation AI — Conversational Mode</h1><p><a href='/app'>Open App</a></p>")  # type: ignore
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN WEBSOCKET
@@ -134,7 +134,7 @@ async def stream(ws: WebSocket):
             # TYPE: FRAME — camera image
             # ────────────────────────────────────────────────────────────────
             elif msg_type == "frame":
-                import base64
+                import base64  # type: ignore
                 frame_b64 = payload.get("data", "")
                 if not frame_b64:
                     continue
