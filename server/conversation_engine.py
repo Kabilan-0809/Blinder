@@ -105,3 +105,38 @@ Answer the user's question based on the observations above. Be direct and concis
     except Exception as e:
         logger.error(f"[GUIDE-Q] Error: {e}")
         return "I couldn't check that right now."
+
+def handle_chat(session_id: str, user_text: str) -> str:
+    """
+    Handles general conversational chat unrelated to navigation (e.g. "how are you today").
+    """
+    mem = get_memory(session_id)
+    goal = mem.get("current_goal", "no specific destination")
+    history = mem.get("conversation_history", [])
+    
+    history_text = "\n".join([f"{t['role'].upper()}: {t['text']}" for t in history[-5:]]) if history else ""
+    
+    prompt = f"""Conversation so far:
+{history_text}
+
+User's current goal: {goal}
+User just said: "{user_text}"
+
+Respond naturally to the user as their friendly, calm AI guide. Address their statement/question directly. Keep it under 25 words."""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                system_instruction="You are a calm, friendly AI guide for a blind user. Be conversational and warm.",
+                temperature=0.6,
+                max_output_tokens=60
+            )
+        )
+        reply = response.text.strip()
+        logger.info(f"[CHAT] → {reply}")
+        return reply
+    except Exception as e:
+        logger.error(f"[CHAT] Error: {e}")
+        return "I'm here, ready to guide you!"

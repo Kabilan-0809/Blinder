@@ -13,7 +13,7 @@ from environment_memory import (
     get_memory, set_goal, add_observation, add_turn,
     complete_goal, pause_task, resume_task
 )
-from conversation_engine import generate_guidance, answer_question
+from conversation_engine import generate_guidance, answer_question, handle_chat
 from safety_detector import run_safety_check
 from route_navigation import load_route, get_next_navigation_step
 
@@ -98,7 +98,8 @@ async def stream(ws: WebSocket):
                     goal = task.get("goal", transcript)
                     set_goal(session_id, goal)
                     add_turn(session_id, "user", transcript)
-                    reply = f"Got it! I'll guide you to {goal}. Please show me the surroundings."
+                    # Use LLM to generate a natural confirmation instead of hardcoding
+                    reply = await asyncio.to_thread(handle_chat, session_id, f"I want to go to {goal}. Please confirm and say you will guide me.")
                     add_turn(session_id, "assistant", reply)
                     logger.info(f"🗺️  [NAVIGATE] Goal set → '{goal}'")
 
@@ -106,7 +107,6 @@ async def stream(ws: WebSocket):
                     question = task.get("question", transcript)
                     pause_task(session_id, question)
                     add_turn(session_id, "user", transcript)
-                    # Will be answered on the next frame
                     reply = "Let me look..."
                     add_turn(session_id, "assistant", reply)
 
@@ -114,14 +114,13 @@ async def stream(ws: WebSocket):
                     new_req = task.get("new_request", transcript)
                     pause_task(session_id, new_req)
                     add_turn(session_id, "user", transcript)
-                    reply = "Sure, hold on."
+                    reply = await asyncio.to_thread(handle_chat, session_id, f"I need to pause navigation: {new_req}")
                     add_turn(session_id, "assistant", reply)
 
                 else:
-                    # Unknown — treat as navigation goal
-                    set_goal(session_id, transcript)
+                    # Chat or unknown — let the LLM handle it naturally
                     add_turn(session_id, "user", transcript)
-                    reply = f"I'll try to help with that."
+                    reply = await asyncio.to_thread(handle_chat, session_id, transcript)
                     add_turn(session_id, "assistant", reply)
 
                 await ws.send_text(json.dumps({

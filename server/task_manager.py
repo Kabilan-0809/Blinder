@@ -10,18 +10,19 @@ logger = logging.getLogger(__name__)
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 TASK_EXTRACT_PROMPT = """You are an AI assistant for a blind navigation system.
-The user has spoken a command. Extract their intent.
+The user has spoken. Extract their primary intent from their speech.
 
 Intents:
-- "navigate": they want to go somewhere
-- "query": they are asking a question about their environment
-- "interrupt": they want to stop, pause, or ask something else while navigating
+- "navigate": they are explicitly stating a destination they want to go to
+- "query": they are asking a question about their current physical environment/surroundings
+- "interrupt": they want to stop or pause the current navigation
+- "chat": casual conversation, asking how the app works, how you are, or anything unrelated to physical movement
 
 Return ONLY a JSON object with this format:
-{"intent": "navigate", "goal": "terminal A10"}
-
+For navigation: {"intent": "navigate", "goal": "terminal A10"}
 For a query: {"intent": "query", "question": "Is there a crowd ahead?"}
-For an interrupt: {"intent": "interrupt", "new_request": "where is the restroom?"}
+For an interrupt: {"intent": "interrupt", "new_request": "pause for a second"}
+For chat: {"intent": "chat", "text": "how to control this app"}
 """
 
 def extract_task(transcript: str) -> dict:
@@ -49,5 +50,5 @@ def extract_task(transcript: str) -> dict:
         
     except Exception as e:
         logger.error(f"[TASK] Extraction error: {e}")
-        # Fallback: treat the whole thing as a navigation goal
-        return {"intent": "navigate", "goal": transcript}
+        # Fallback: treat the whole thing as general chat
+        return {"intent": "chat", "text": transcript}
