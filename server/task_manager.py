@@ -422,11 +422,16 @@ class TaskEngine:
                 config=genai.types.GenerateContentConfig(
                     system_instruction=TASK_EXTRACT_PROMPT,
                     temperature=0.05,
-                    max_output_tokens=250,
+                    max_output_tokens=500,
                     response_mime_type="application/json",
+                    thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
                 ),
             )
-            parsed = json.loads(response.text)  # type: ignore
+            raw_text = response.text or ""  # type: ignore
+            if not raw_text.strip():
+                logger.warning("[TASKS] Empty response from Gemini")
+                return self._fallback(transcript)
+            parsed = json.loads(raw_text)  # type: ignore
 
             # Normalise fields
             parsed.setdefault("intent", "chat")

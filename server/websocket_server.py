@@ -83,6 +83,25 @@ async def stream(ws: WebSocket):  # type: ignore
     logger.info(f"🔗 [CONNECT] session={session_id}")
 
     state = _SessionState()
+    mem = mem_mgr.get_memory(session_id)
+
+    # ── Send personalized welcome from Iris ──
+    try:
+        import companion_personality as iris  # type: ignore
+        profile = mem.get("user_profile", {})
+        welcome_text = iris.get_welcome_message(
+            user_name=profile.get("name"),
+            journey_count=profile.get("journey_count", 0),
+        )
+        await _send(ws, {
+            "type": "welcome",
+            "text": welcome_text,
+            "ask_name": profile.get("name") is None,
+        })
+        profile["journey_count"] = profile.get("journey_count", 0) + 1
+        logger.info(f"🫂 [IRIS] Welcome: '{welcome_text}'")
+    except Exception as e:
+        logger.error(f"[IRIS] Welcome error: {e}")
 
     try:
         while True:
@@ -110,6 +129,17 @@ async def stream(ws: WebSocket):  # type: ignore
                 if "danger_detection" in payload:
                     state.danger_detection_enabled = bool(payload["danger_detection"])
                     logger.info(f"⚙️ [SETTING] Danger Detection = {state.danger_detection_enabled}")
+                continue
+
+            # ─────────────────────────────────────────────────────────────
+            # PROFILE — user sends their name
+            # ─────────────────────────────────────────────────────────────
+            if msg_type == "profile":
+                name = payload.get("name", "").strip()
+                if name:
+                    mem = mem_mgr.get_memory(session_id)
+                    mem.get("user_profile", {})["name"] = name
+                    logger.info(f"👤 [PROFILE] User name set to: {name}")
                 continue
 
             # ─────────────────────────────────────────────────────────────
@@ -176,6 +206,18 @@ async def _handle_audio(ws: WebSocket, session_id: str, state: _SessionState, pa
 
     logger.info(f"✅ [STT] {(time.time()-t0)*1000:.0f}ms: '{transcript}'")
     await _send(ws, {"type": "transcript", "text": transcript})
+
+    # ── Update mood from speech ──
+    try:
+        import companion_personality as iris  # type: ignore
+        mood = iris.detect_mood(transcript)
+        mem_temp = mem_mgr.get_memory(session_id)
+        ps = mem_temp.get("personality_state", {})
+        ps["current_mood"] = mood
+        if mood != "calm":
+            logger.info(f"💭 [MOOD] Detected: {mood}")
+    except Exception:
+        pass
 
     # ── Extract structured task ──────────────────────────────
     try:
@@ -357,6 +399,14 @@ async def _handle_frame(ws: WebSocket, session_id: str, state: _SessionState, pa
             # Update session environment memory
             mem_mgr.update_scene(session_id, scene)
 
+            # Update scene mood for Iris personality
+            try:
+                import companion_personality as iris  # type: ignore
+                ps = mem.get("personality_state", {})
+                ps["scene_mood"] = scene.get("mood_hint") or iris.infer_scene_mood(scene)
+            except Exception:
+                pass
+
             # Flag decision point for scheduler on next frame
             if scene.get("decision_point"):
                 mem["_decision_point_flagged"] = True
@@ -430,6 +480,26 @@ async def _handle_frame(ws: WebSocket, session_id: str, state: _SessionState, pa
                 })
     except Exception as e:
         logger.error(f"[FUSION] fuse error: {e}")
+
+    # ── 6. AMBIENT COMPANION OBSERVATION (during nav, low-priority) ──
+    if goal and not pending_q:
+        try:
+            import companion_personality as iris  # type: ignore
+            ps = mem.get("personality_state", {})
+            last_amb = ps.get("last_ambient_time", 0.0)
+            env = mem.get("environment_memory", {})
+            amb = iris.get_ambient_observation(
+                crowd_density=env.get("crowd_density", "unknown"),
+                clear_path=safety_result.get("clear_path", True),
+                journey_progress=0.0,  # TODO: calculate from nav progress
+                last_ambient_time=last_amb,
+            )
+            if amb:
+                ps["last_ambient_time"] = time.time()
+                await _send(ws, {"type": "ambient", "text": amb})
+                logger.info(f"🫂 [IRIS] Ambient: '{amb}'")
+        except Exception as e:
+            logger.error(f"[IRIS] Ambient error: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

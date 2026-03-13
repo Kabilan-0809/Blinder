@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>Blinder AI</title>
+  <title>Iris — Your Walking Companion</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
   <style>
@@ -41,6 +41,12 @@
       flex-shrink: 0;
     }
     header h1 { font-size: 1rem; font-weight: 700; letter-spacing: 0.04em; }
+    #journeyTimer {
+      font-size: 0.72rem;
+      color: #6b7280;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
     #statusDot {
       width: 10px; height: 10px;
       border-radius: 50%;
@@ -286,7 +292,8 @@
 <body>
 
   <header>
-    <h1>🦯 Blinder AI</h1>
+    <h1>🫂 Iris</h1>
+    <span id="journeyTimer"></span>
     <div id="statusDot"></div>
   </header>
 
@@ -298,10 +305,7 @@
   </div>
 
   <div id="chatFeed">
-    <div class="bubble ai">
-      <div class="label">Blinder AI</div>
-      Hello! Tap the mic and tell me where you'd like to go.
-    </div>
+    <!-- Welcome message will be sent by server -->
   </div>
 
   <div class="mic-bar">
@@ -333,10 +337,38 @@
     let ws = null, camStream = null, frameIntervalId = null;
     let mediaRecorder = null, audioChunks = [];
     let isRecording = false, cameraOn = false, dangerOn = true;
+    let journeyStartTime = Date.now();
+    const journeyTimerEl = document.getElementById('journeyTimer');
+
+    // ─── USER PROFILE ──────────────────────────────────────────────────────────
+    let userName = localStorage.getItem('iris_user_name') || null;
 
     // ─── TTS ────────────────────────────────────────────────────────────────────
     const synth = window.speechSynthesis;
     let lastSpeechTime = 0;
+    let warmVoice = null;
+
+    // Pick a warm/natural voice (prefer female voices for Iris)
+    function pickWarmVoice() {
+      const voices = synth.getVoices();
+      // Prefer: Samantha, Karen, Fiona, Victoria, Google UK Female
+      const preferred = ['samantha', 'karen', 'fiona', 'victoria', 'female', 'zira', 'hazel'];
+      for (const pref of preferred) {
+        const match = voices.find(v => v.name.toLowerCase().includes(pref));
+        if (match) { warmVoice = match; break; }
+      }
+      if (!warmVoice && voices.length > 0) warmVoice = voices[0];
+    }
+    synth.onvoiceschanged = pickWarmVoice;
+    pickWarmVoice();
+
+    // Journey timer
+    setInterval(() => {
+      const elapsed = Math.floor((Date.now() - journeyStartTime) / 1000);
+      const mins = Math.floor(elapsed / 60);
+      const secs = elapsed % 60;
+      journeyTimerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+    }, 1000);
 
     function speak(text, priority = 'normal') {
       if (!text) return;
@@ -344,7 +376,8 @@
       if (priority !== 'safety' && synth.speaking && age < 3500) return;
       if (synth.speaking) synth.cancel();
       const utt = new SpeechSynthesisUtterance(text);
-      utt.rate = 1.05; utt.volume = 1.0;
+      if (warmVoice) utt.voice = warmVoice;
+      utt.rate = 0.95; utt.pitch = 1.05; utt.volume = 1.0;
       utt.onstart = () => { lastSpeechTime = Date.now(); };
       synth.speak(utt);
     }
@@ -394,9 +427,13 @@
       ws.onopen = () => {
         statusDot.classList.add('live');
         setState('🟢 Connected — Tap to Speak', '#22c55e');
+        journeyStartTime = Date.now();
         console.log('[WS] Connected');
-        // Send initial danger state
+        // Send initial settings + user profile
         ws.send(JSON.stringify({ type: 'setting', danger_detection: dangerOn }));
+        if (userName) {
+          ws.send(JSON.stringify({ type: 'profile', name: userName }));
+        }
       };
 
       ws.onmessage = (evt) => {
@@ -404,7 +441,23 @@
         try { data = JSON.parse(evt.data); } catch { return; }
         console.log('[WS RECV]', data.type, data.text || '');
 
-        if (data.type === 'safety') {
+        if (data.type === 'welcome') {
+          addBubble('ai', data.text, '🫂 Iris');
+          speak(data.text);
+          if (!userName && data.ask_name) {
+            setTimeout(() => {
+              const name = prompt('Hi! What should I call you?');
+              if (name && name.trim()) {
+                userName = name.trim();
+                localStorage.setItem('iris_user_name', userName);
+                ws.send(JSON.stringify({ type: 'profile', name: userName }));
+                addBubble('ai', `Nice to meet you, ${userName}! 😊`, '🫂 Iris');
+                speak(`Nice to meet you, ${userName}!`);
+              }
+            }, 3000);
+          }
+
+        } else if (data.type === 'safety') {
           addBubble('safety', '⚠️ ' + data.text);
           speak(data.text, 'safety');
           flashRed();
@@ -414,9 +467,16 @@
         } else if (data.type === 'response') {
           removeTyping();
           if (data.transcript) addBubble('user', data.transcript);
-          addBubble('ai', data.text, 'Blinder AI');
+          addBubble('ai', data.text, '🫂 Iris');
           speak(data.text);
           setState('🟢 Listening…', '#22c55e');
+
+        } else if (data.type === 'ambient') {
+          addBubble('ai', data.text, '🫂 Iris');
+          speak(data.text);
+
+        } else if (data.type === 'transcript') {
+          addBubble('user', data.text);
 
         } else if (data.type === 'navigation') {
           addBubble('nav', '🗺️ ' + data.text, 'Route');
@@ -424,7 +484,7 @@
 
         } else if (data.type === 'route_loaded') {
           const msg = data.ok ? `Route loaded — ${data.steps} steps.` : 'Failed to load route.';
-          addBubble('ai', msg, 'Blinder AI');
+          addBubble('ai', msg, '🫂 Iris');
           speak(msg);
 
         } else if (data.type === 'error') {
@@ -572,7 +632,7 @@
     micBtn.addEventListener('click', async () => {
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         connectWS();
-        addBubble('ai', 'Connecting to AI…', 'Blinder AI');
+        addBubble('ai', 'Connecting to Iris…', '🫂 Iris');
         return;
       }
       if (!isRecording) {

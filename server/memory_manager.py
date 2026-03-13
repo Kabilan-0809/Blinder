@@ -36,6 +36,7 @@ def get_memory(session_id: str) -> dict:  # type: ignore
 
 
 def _new_session() -> dict:  # type: ignore
+    import time  # type: ignore
     return {
         "navigation_goal": None,
         "navigation_progress": {
@@ -56,6 +57,23 @@ def _new_session() -> dict:  # type: ignore
         "last_location": None,
         "task_status": "idle",      # idle | active | paused | completed
         "pending_question": None,
+        # ── Iris personality state ──
+        "user_profile": {
+            "name": None,              # User's preferred name
+            "journey_count": 0,        # Total journeys with Iris
+            "favorite_destinations": [],
+        },
+        "session_stats": {
+            "started_at": time.time(),
+            "questions_asked": 0,
+            "scenes_analyzed": 0,
+            "safety_alerts_sent": 0,
+        },
+        "personality_state": {
+            "current_mood": "calm",       # calm | frustrated | excited | urgent
+            "last_ambient_time": 0.0,     # timestamp of last ambient observation
+            "scene_mood": "neutral",      # relaxed | alert | peaceful | focused | attentive | neutral
+        },
     }
 
 
