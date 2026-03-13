@@ -261,6 +261,25 @@
     }
     #camBtn:hover { background: rgba(255,255,255,0.1); }
 
+    #dangerBtn {
+      position: absolute;
+      left: 1rem;
+      bottom: 1.25rem;
+      background: rgba(239,68,68,0.2);
+      border: 1px solid rgba(239,68,68,0.5);
+      border-radius: 50%;
+      width: 44px; height: 44px;
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.2s;
+    }
+    #dangerBtn.off {
+      background: var(--card);
+      border-color: var(--border);
+      opacity: 0.6;
+    }
+
     canvas#hiddenCanvas { display: none; }
   </style>
 </head>
@@ -286,6 +305,7 @@
   </div>
 
   <div class="mic-bar">
+    <button id="dangerBtn" title="Toggle 1m Danger Detection">🚨</button>
     <button id="micBtn" title="Hold to speak">🎤</button>
     <div id="micLabel">Tap to Speak</div>
     <button id="camBtn" title="Start / Stop Camera">📷</button>
@@ -298,6 +318,7 @@
     const micBtn    = document.getElementById('micBtn');
     const micLabel  = document.getElementById('micLabel');
     const camBtn    = document.getElementById('camBtn');
+    const dangerBtn = document.getElementById('dangerBtn');
     const chatFeed  = document.getElementById('chatFeed');
     const videoEl   = document.getElementById('videoEl');
     const overlay   = document.getElementById('overlayCanvas');
@@ -311,7 +332,7 @@
     // ─── STATE ──────────────────────────────────────────────────────────────────
     let ws = null, camStream = null, frameIntervalId = null;
     let mediaRecorder = null, audioChunks = [];
-    let isRecording = false, cameraOn = false;
+    let isRecording = false, cameraOn = false, dangerOn = true;
 
     // ─── TTS ────────────────────────────────────────────────────────────────────
     const synth = window.speechSynthesis;
@@ -374,6 +395,8 @@
         statusDot.classList.add('live');
         setState('🟢 Connected — Tap to Speak', '#22c55e');
         console.log('[WS] Connected');
+        // Send initial danger state
+        ws.send(JSON.stringify({ type: 'setting', danger_detection: dangerOn }));
       };
 
       ws.onmessage = (evt) => {
@@ -564,6 +587,20 @@
         startCamera();
       } else {
         stopCamera();
+      }
+    });
+
+    dangerBtn.addEventListener('click', () => {
+      dangerOn = !dangerOn;
+      if (dangerOn) {
+        dangerBtn.classList.remove('off');
+        addBubble('safety', 'Danger detection ON');
+      } else {
+        dangerBtn.classList.add('off');
+        addBubble('safety', 'Danger detection OFF');
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'setting', danger_detection: dangerOn }));
       }
     });
 

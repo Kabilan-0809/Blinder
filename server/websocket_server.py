@@ -64,6 +64,7 @@ class _SessionState:
         self.scheduler    = DynamicFrameScheduler()
         self.last_spoken  = 0.0      # timestamp of last spoken output (any source)
         self.first_frame  = True     # force LLM on very first frame
+        self.danger_detection_enabled = True # UI toggle state
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,6 +99,15 @@ async def stream(ws: WebSocket):  # type: ignore
                 continue
 
             msg_type = payload.get("type")
+
+            # ─────────────────────────────────────────────────────────────
+            # SETTING — UI toggles sent by the client
+            # ─────────────────────────────────────────────────────────────
+            if msg_type == "setting":
+                if "danger_detection" in payload:
+                    state.danger_detection_enabled = payload["danger_detection"]
+                    logger.info(f"⚙️ [SETTING] Danger Detection = {state.danger_detection_enabled}")
+                continue
 
             # ─────────────────────────────────────────────────────────────
             # AUDIO — user spoke (pressed STOP)
@@ -231,7 +241,11 @@ async def _handle_frame(ws: WebSocket, session_id: str, state: _SessionState, pa
     long_tasks = mem.get("active_tasks", {}).get("long_running", [])
 
     # ── 1. SAFETY — always runs, fast (<100ms) ─────────────────
-    safety_result = await asyncio.to_thread(run_safety_check, jpeg_bytes)
+    safety_result = await asyncio.to_thread(
+        run_safety_check, 
+        jpeg_bytes, 
+        state.danger_detection_enabled
+    )
     safety_alert = safety_result.get("alert")
 
     # ── 2. DYNAMIC SCHEDULER — should we call the LLM? ────────

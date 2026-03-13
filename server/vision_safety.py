@@ -38,9 +38,10 @@ CAUTION_THRESHOLD = 0.35    # bbox occupies >35% height → approaching (~1-2m)
 INFER_W, INFER_H = 320, 240
 
 
-def run_safety_check(jpeg_bytes: bytes) -> dict:  # type: ignore
+def run_safety_check(jpeg_bytes: bytes, safety_enabled: bool = True) -> dict:  # type: ignore
     """
     Run YOLOv8n on a JPEG frame and return structured safety result.
+    If safety_enabled is False, returns clear path without generating UI alerts.
     """
     frame = cv2.imdecode(np.frombuffer(jpeg_bytes, np.uint8), cv2.IMREAD_COLOR)
     if frame is None:
@@ -76,12 +77,12 @@ def run_safety_check(jpeg_bytes: bytes) -> dict:  # type: ignore
             objects.append({
                 "type": label,
                 "position": pos,
-                "proximity_score": round(proximity_score, 2),
+                "proximity_score": round(float(proximity_score), 2),  # type: ignore
                 "conf": round(conf, 2),
                 "bbox": [round(x1), round(y1), round(x2), round(y2)],
             })
             object_types.add(label)
-            closest_score = max(closest_score, proximity_score)
+            closest_score = max(closest_score, float(proximity_score))
 
     # No objects detected
     if not objects:
@@ -92,10 +93,17 @@ def run_safety_check(jpeg_bytes: bytes) -> dict:  # type: ignore
 
     # Estimate a rough clear distance from proximity score
     # At proximity_score=1.0 → ~0.3m; at 0.1 → ~10m (inverse linear heuristic)
-    estimated_clear_m = max(0.3, min(15.0, 1.5 / closest_score)) if closest_score > 0 else 15.0
+    estimated_clear_m = max(0.3, min(15.0, 1.5 / closest_score)) if closest_score > 0.0 else 15.0  # type: ignore
 
     # ── Danger check ────────────────────────────────────────
     danger_objects = [o for o in objects if o["proximity_score"] >= DANGER_THRESHOLD]
+    
+    # If the user toggled safety off via UI, suppress the alert
+    if not safety_enabled:
+        if danger_objects:
+            logger.debug("[SAFETY] Danger detected but supressed by UI toggle.")
+        danger_objects = []
+
     if danger_objects:
         # Report the single closest threat
         threat = max(danger_objects, key=lambda o: o["proximity_score"])
