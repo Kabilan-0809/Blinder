@@ -1,55 +1,78 @@
+"""
+conversation_engine.py
+
+LLM-backed conversational layer for the Blind AI navigation assistant.
+
+Functions:
+  generate_guidance()     — proactive navigation + task-aware scene guidance
+  answer_question()       — answer a direct user query using scene context
+  handle_chat()           — pure conversational response
+  generate_arrival()      — warm arrival confirmation when goal is reached
+  check_long_running_tasks() — evaluate long-running tasks against scene
+"""
+
 import os  # type: ignore
-import json  # type: ignore
 import logging  # type: ignore
 from google import genai  # type: ignore
 from dotenv import load_dotenv  # type: ignore
-from environment_memory import get_memory  # type: ignore
+import memory_manager as mem_mgr  # type: ignore
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-GUIDE_SYSTEM_PROMPT = """You are a calm, human-like AI guide walking beside a blind person.
-You help them reach their goal by analyzing their environment and giving clear guidance.
+GUIDE_SYSTEM_PROMPT = """You are a calm, warm AI guide walking beside a blind person.
+You speak like a trusted human companion — clear, reassuring, never robotic.
 
-RULES:
-1. Speak in first-person, like a calm friend: "I can see...", "You're heading..."
-2. Focus on the user's current GOAL. Direct your guidance toward achieving it.
-3. If the goal appears in the observations, announce it enthusiastically: "You've reached [goal]!"
-4. Keep responses under 20 words.
-5. Be warm and reassuring, never robotic.
-6. Reference what you actually see in the observations, don't hallucinate.
+Rules:
+1. Always speak in first person: "I can see...", "You're approaching...", "Just ahead..."
+2. Keep ALL responses under 25 words. Brevity is critical.
+3. Your primary job: help the user reach their goal.
+4. React to what you actually see in the observations. Never hallucinate.
+5. If the goal is visible, announce enthusiastically: "You've reached [goal]!"
+6. Address active monitoring tasks proactively in your guidance.
 """
 
-def generate_guidance(session_id: str, latest_observation: str = None) -> str:  # type: ignore
+
+# ─────────────────────────────────────────────────────────────
+# Proactive navigation guidance
+# ─────────────────────────────────────────────────────────────
+
+def generate_guidance(session_id: str, scene: dict | None = None) -> str | None:  # type: ignore
     """
-    Main reasoning engine: takes the current session memory and generates
-    a contextual, goal-driven navigation instruction.
+    Generates a contextual navigation instruction based on:
+    - Current goal
+    - Recent scene observation (from scene_reasoning)
+    - Long-running monitoring tasks
+    - Conversation history
+
+    Returns guidance string or None if rate-limited / error.
     """
-    mem = get_memory(session_id)
-    goal = mem.get("current_goal", "no specific destination")
+    mem = mem_mgr.get_memory(session_id)
+    goal = mem.get("navigation_goal") or "no specific destination"
     task_status = mem.get("task_status", "idle")
-    observations = mem.get("environment_observations", [])
     history = mem.get("conversation_history", [])
-    
-    if latest_observation:
-        observations = observations + [latest_observation]  # Include latest without saving yet
-    
-    # Build context string for the LLM
-    obs_text = "\n".join([f"- {o}" for o in observations[-3:]]) if observations else "No observations yet."
+    long_tasks = mem.get("active_tasks", {}).get("long_running", [])
+    env = mem.get("environment_memory", {})
+
+    scene_desc = (scene or {}).get("description") or env.get("last_scene_description") or "No scene data."
+
     history_text = "\n".join([f"{t['role'].upper()}: {t['text']}" for t in history[-4:]]) if history else ""
-    
-    prompt = f"""User's goal: "{goal}"
-Task status: {task_status}
+    tasks_text = "\n".join([f"- {t}" for t in long_tasks]) if long_tasks else "None."
 
-Recent environment observations:
-{obs_text}
+    prompt = f"""Navigation goal: "{goal}"
+Status: {task_status}
 
-Conversation so far:
+Current scene: {scene_desc}
+
+Active monitoring tasks:
+{tasks_text}
+
+Recent conversation:
 {history_text}
 
-Now generate your next navigation instruction or response:"""
+Provide your next navigation instruction or scene update (max 25 words):"""
 
     try:
         response = client.models.generate_content(
@@ -57,72 +80,131 @@ Now generate your next navigation instruction or response:"""
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=GUIDE_SYSTEM_PROMPT,
-                temperature=0.4,
-                max_output_tokens=60
-            )
+                temperature=0.35,
+                max_output_tokens=60,
+            ),
         )
-        reply = response.text.strip()
+        reply = response.text.strip()  # type: ignore
         logger.info(f"[GUIDE] → {reply}")
         return reply  # type: ignore
-        
+
     except Exception as e:
         err = str(e)
         if "429" in err:
-            logger.warning("[GUIDE] Rate limited. Skipping.")
+            logger.warning("[GUIDE] Rate limited.")
         else:
             logger.error(f"[GUIDE] Error: {e}")
         return None  # type: ignore
 
-def answer_question(session_id: str, question: str, latest_observation: str) -> str:  # type: ignore
+
+# ─────────────────────────────────────────────────────────────
+# Answer a direct user question
+# ─────────────────────────────────────────────────────────────
+
+def answer_question(session_id: str, question: str, scene: dict | None = None) -> str:  # type: ignore
     """
-    Handles an ad-hoc vision query from the user mid-navigation.
+    Answers a user's specific question about the current environment.
+    After answering, the caller should remove the question from short_tasks.
     """
-    mem = get_memory(session_id)
-    obs = mem.get("environment_observations", [])
-    combined = obs[-2:] + [latest_observation] if latest_observation else obs[-3:]
-    obs_text = "\n".join([f"- {o}" for o in combined])
-    
-    prompt = f"""Environment observations:
-{obs_text}
+    mem = mem_mgr.get_memory(session_id)
+    env = mem.get("environment_memory", {})
+    scene_desc = (scene or {}).get("description") or env.get("last_scene_description") or "No scene data."
+    signs = ", ".join((scene or {}).get("signs_seen", env.get("observed_signs", [])))  # type: ignore
+    crowd = (scene or {}).get("crowd_density") or env.get("crowd_density", "unknown")
+
+    prompt = f"""Scene description: {scene_desc}
+Visible signs: {signs or 'none'}
+Crowd density: {crowd}
 
 User question: "{question}"
 
-Answer the user's question based on the observations above. Be direct and concise (under 15 words)."""
+Answer directly and concisely (under 15 words). Use only what you can see."""
 
     try:
         response = client.models.generate_content(
             model="gemini-2.0-flash-lite",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
-                system_instruction="You are a helpful AI vision assistant for a blind user. Answer very short.",
+                system_instruction="You are a helpful AI vision assistant for a blind user. Answer very short and factually.",
                 temperature=0.2,
-                max_output_tokens=40
-            )
+                max_output_tokens=50,
+            ),
         )
-        reply = response.text.strip()
-        logger.info(f"[GUIDE-Q] → {reply}")
+        reply = response.text.strip()  # type: ignore
+        logger.info(f"[Q&A] Q: '{question}' → '{reply}'")
         return reply  # type: ignore
+
     except Exception as e:
-        logger.error(f"[GUIDE-Q] Error: {e}")
+        logger.error(f"[Q&A] Error: {e}")
         return "I couldn't check that right now."  # type: ignore
 
+
+# ─────────────────────────────────────────────────────────────
+# Check long-running monitoring tasks against scene
+# ─────────────────────────────────────────────────────────────
+
+def check_long_running_tasks(session_id: str, scene: dict) -> str | None:  # type: ignore
+    """
+    Evaluates whether any long-running tasks are triggered by the current scene.
+    Returns a spoken report or None if nothing to report.
+    Example: task="detect poles ahead", scene shows pole → "There's a pole ahead."
+    """
+    mem = mem_mgr.get_memory(session_id)
+    long_tasks = mem.get("active_tasks", {}).get("long_running", [])
+    if not long_tasks:
+        return None  # type: ignore
+
+    scene_desc = scene.get("description", "")
+    if not scene_desc or scene_desc == "UNCLEAR":
+        return None  # type: ignore
+
+    tasks_text = "\n".join([f"- {t}" for t in long_tasks])
+    prompt = f"""Scene: {scene_desc}
+
+Monitoring tasks (check if any are triggered by the scene):
+{tasks_text}
+
+If ANY task is triggered, write ONE short spoken alert (max 12 words).
+If NONE are triggered, respond with exactly: NONE"""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=prompt,
+            config=genai.types.GenerateContentConfig(
+                system_instruction="You are a safety monitor for a blind navigation system. Be precise and brief.",
+                temperature=0.1,
+                max_output_tokens=40,
+            ),
+        )
+        result = response.text.strip()  # type: ignore
+        if result == "NONE" or not result:
+            return None  # type: ignore
+        logger.info(f"[TASK-CHECK] → {result}")
+        return result  # type: ignore
+
+    except Exception as e:
+        logger.error(f"[TASK-CHECK] Error: {e}")
+        return None  # type: ignore
+
+
+# ─────────────────────────────────────────────────────────────
+# General conversational chat
+# ─────────────────────────────────────────────────────────────
+
 def handle_chat(session_id: str, user_text: str) -> str:  # type: ignore
-    """
-    Handles general conversational chat unrelated to navigation (e.g. "how are you today").
-    """
-    mem = get_memory(session_id)
-    goal = mem.get("current_goal", "no specific destination")
+    """Handles general conversational messages unrelated to navigation."""
+    mem = mem_mgr.get_memory(session_id)
+    goal = mem.get("navigation_goal") or "none"
     history = mem.get("conversation_history", [])
-    
     history_text = "\n".join([f"{t['role'].upper()}: {t['text']}" for t in history[-5:]]) if history else ""
-    
-    prompt = f"""Conversation so far:
+
+    prompt = f"""User's goal: {goal}
+Conversation:
 {history_text}
+User: "{user_text}"
 
-User's current goal: {goal}
-User just said: "{user_text}"
-
-Respond naturally to the user as their friendly, calm AI guide. Address their statement/question directly. Keep it under 25 words."""
+Respond warmly as their AI guide. Keep it under 25 words."""
 
     try:
         response = client.models.generate_content(
@@ -131,12 +213,34 @@ Respond naturally to the user as their friendly, calm AI guide. Address their st
             config=genai.types.GenerateContentConfig(
                 system_instruction="You are a calm, friendly AI guide for a blind user. Be conversational and warm.",
                 temperature=0.6,
-                max_output_tokens=60
-            )
+                max_output_tokens=60,
+            ),
         )
-        reply = response.text.strip()
+        reply = response.text.strip()  # type: ignore
         logger.info(f"[CHAT] → {reply}")
         return reply  # type: ignore
+
     except Exception as e:
         logger.error(f"[CHAT] Error: {e}")
-        return "I'm here, ready to guide you!"  # type: ignore
+        return "I'm here with you, ready to help!"  # type: ignore
+
+
+# ─────────────────────────────────────────────────────────────
+# Arrival message
+# ─────────────────────────────────────────────────────────────
+
+def generate_arrival(goal: str) -> str:  # type: ignore
+    """Generate a warm arrival announcement."""
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash-lite",
+            contents=f'The user has arrived at their destination: "{goal}". Announce this warmly and enthusiastically in under 15 words.',
+            config=genai.types.GenerateContentConfig(
+                system_instruction=GUIDE_SYSTEM_PROMPT,
+                temperature=0.7,
+                max_output_tokens=40,
+            ),
+        )
+        return response.text.strip()  # type: ignore
+    except Exception:
+        return f"You've arrived at {goal}!"  # type: ignore
