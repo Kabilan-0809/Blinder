@@ -44,10 +44,7 @@ def _new_session() -> dict:  # type: ignore
             "distance_to_turn": None,
             "last_announced_threshold": None,
         },
-        "active_tasks": {
-            "long_running": [],   # persist until user cancels
-            "short": [],          # answered once, then removed
-        },
+        # Tasks are now managed by task_manager.TaskEngine
         "environment_memory": {
             "observed_signs": [],
             "crowd_density": "unknown",
@@ -92,50 +89,48 @@ def clear_navigation_goal(session_id: str):  # type: ignore
     mem = get_memory(session_id)
     mem["navigation_goal"] = None
     mem["task_status"] = "completed"
-    mem["active_tasks"]["long_running"] = []
+    
+    import task_manager  # type: ignore
+    engine = task_manager.get_engine(session_id)
+    engine.complete_navigation()
     logger.info(f"[MEM] Navigation complete for session {session_id}")
 
 
 # ─────────────────────────────────────────────────────────────
-# Task management
+# Task management (Legacy wrappers mostly unused now, kept for compat)
 # ─────────────────────────────────────────────────────────────
 
 def add_long_running_task(session_id: str, task: str):  # type: ignore
-    """Add a task that persists for the entire navigation (e.g. 'warn about poles')."""
-    mem = get_memory(session_id)
-    if task not in mem["active_tasks"]["long_running"]:
-        mem["active_tasks"]["long_running"].append(task)
-        logger.info(f"[MEM] Long-running task added: '{task}'")
-
+    import task_manager  # type: ignore
+    task_manager.get_engine(session_id).add_task(task, "LONG_RUNNING", "safety")
 
 def add_short_task(session_id: str, task: str):  # type: ignore
-    """Add a one-shot query task (e.g. 'is there a crowd ahead?')."""
-    mem = get_memory(session_id)
-    if task not in mem["active_tasks"]["short"]:
-        mem["active_tasks"]["short"].append(task)
-        logger.info(f"[MEM] Short task added: '{task}'")
+    import task_manager  # type: ignore
+    task_manager.get_engine(session_id).add_task(task, "SHORT", "scene")
 
-
-def remove_short_task(session_id: str, task: str):  # type: ignore
-    """Remove a short task after it has been answered."""
-    mem = get_memory(session_id)
-    try:
-        mem["active_tasks"]["short"].remove(task)
-        logger.info(f"[MEM] Short task answered & removed: '{task}'")
-    except ValueError:
-        pass
-
+def remove_short_task(session_id: str, task_desc: str):  # type: ignore
+    import task_manager  # type: ignore
+    engine = task_manager.get_engine(session_id)
+    # Find by description and remove
+    for t in engine.get_active_tasks():
+        if t["description"] == task_desc and t["type"] == "SHORT":
+            engine.remove_task(t["id"])
+            break
 
 def get_active_tasks(session_id: str) -> dict:  # type: ignore
-    """Return the full active_tasks dict."""
-    return get_memory(session_id)["active_tasks"]
-
+    """Legacy compat: returns old-style dict mapping."""
+    import task_manager  # type: ignore
+    engine = task_manager.get_engine(session_id)
+    tasks = engine.get_active_tasks()
+    return {
+        "long_running": [t["description"] for t in tasks if t["type"] == "LONG_RUNNING"],
+        "short": [t["description"] for t in tasks if t["type"] == "SHORT"],
+    }
 
 def set_pending_question(session_id: str, question: str):  # type: ignore
     mem = get_memory(session_id)
     mem["pending_question"] = question
     mem["task_status"] = "paused"
-
 
 def clear_pending_question(session_id: str):  # type: ignore
     mem = get_memory(session_id)
