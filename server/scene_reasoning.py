@@ -60,7 +60,7 @@ def analyze_frame(jpeg_bytes: bytes, goal: str = "", active_tasks: list | None =
     Returns structured scene dict. Falls back to a minimal dict on error.
     """
     try:
-        import google.genai.types as gtypes  # type: ignore
+        from google.genai import types as gtypes  # type: ignore
 
         # Build context prefix
         context_parts = []
@@ -72,24 +72,34 @@ def analyze_frame(jpeg_bytes: bytes, goal: str = "", active_tasks: list | None =
         prompt = " ".join(context_parts)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=[
-                gtypes.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
-                gtypes.Part.from_text(prompt),  # type: ignore
-            ],
-            config=genai.types.GenerateContentConfig(
+            model="gemini-2.5-flash",
+            contents=gtypes.Content(
+                role="user",
+                parts=[
+                    gtypes.Part.from_bytes(data=jpeg_bytes, mime_type="image/jpeg"),
+                    gtypes.Part(text=prompt),
+                ]
+            ),
+            config=gtypes.GenerateContentConfig(
                 system_instruction=SCENE_SYSTEM_PROMPT,
                 temperature=0.1,
-                max_output_tokens=200,
-                response_mime_type="application/json",
+                max_output_tokens=300,
             ),
         )
 
         raw = response.text.strip()  # type: ignore
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
         scene = json.loads(raw)
         logger.info(f"[SCENE] {scene.get('description', '')[:80]}")
         return scene  # type: ignore
 
+    except json.JSONDecodeError as e:
+        logger.warning(f"[SCENE] JSON parse error: {e} — raw: {raw[:100] if 'raw' in dir() else 'N/A'}")
+        return _fallback_scene()
     except Exception as e:
         logger.error(f"[SCENE] Analysis error: {e}")
         return _fallback_scene()

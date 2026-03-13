@@ -76,7 +76,7 @@ Provide your next navigation instruction or scene update (max 25 words):"""
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction=GUIDE_SYSTEM_PROMPT,
@@ -122,7 +122,7 @@ Answer directly and concisely (under 15 words). Use only what you can see."""
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction="You are a helpful AI vision assistant for a blind user. Answer very short and factually.",
@@ -169,7 +169,7 @@ If NONE are triggered, respond with exactly: NONE"""
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction="You are a safety monitor for a blind navigation system. Be precise and brief.",
@@ -208,7 +208,7 @@ Respond warmly as their AI guide. Keep it under 25 words."""
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=genai.types.GenerateContentConfig(
                 system_instruction="You are a calm, friendly AI guide for a blind user. Be conversational and warm.",
@@ -233,7 +233,7 @@ def generate_arrival(goal: str) -> str:  # type: ignore
     """Generate a warm arrival announcement."""
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash-lite",
+            model="gemini-2.5-flash",
             contents=f'The user has arrived at their destination: "{goal}". Announce this warmly and enthusiastically in under 15 words.',
             config=genai.types.GenerateContentConfig(
                 system_instruction=GUIDE_SYSTEM_PROMPT,

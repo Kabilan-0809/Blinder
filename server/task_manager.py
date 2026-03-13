@@ -417,7 +417,7 @@ class TaskEngine:
 
         try:
             response = client.models.generate_content(
-                model="gemini-2.0-flash-lite",
+                model="gemini-2.5-flash",
                 contents=f'User said: "{transcript}"',
                 config=genai.types.GenerateContentConfig(
                     system_instruction=TASK_EXTRACT_PROMPT,

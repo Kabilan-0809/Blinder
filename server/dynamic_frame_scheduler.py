@@ -89,8 +89,8 @@ logger = logging.getLogger(__name__)
 WALK_SPEED_MPS       = 1.2    # average user walking speed (m/s)
 CAMERA_FOV_MAX_M     = 25.0   # max visible path the camera can see (m)
 
-MIN_GAP_SEC          = 3.0    # hard minimum between LLM calls (anti-flood)
-KEEPALIVE_SEC        = 15.0   # maximum silence — always call LLM within this
+MIN_GAP_SEC          = 6.0    # hard minimum between LLM calls (anti-flood) — raised to avoid rate limits
+KEEPALIVE_SEC        = 20.0   # maximum silence — always call LLM within this
 
 MIN_CLEAR_M          = 10.0   # below this, treat as approaching decision point
 NAV_TURN_THRESHOLD_M = 20.0   # fire if navigation turn is within this distance
@@ -318,10 +318,18 @@ class DynamicFrameScheduler:
             logger.info(f"[SCHED] Rule 6 — high density: {n_objects} objects")
             return self._capture(now, f"rule6_density:{n_objects}", 0.0)
 
-        new_types = obj_types - self._prev_object_types
+        # Rule 6b: Only trigger on HIGH-VALUE new object classes, not routine ones
+        # (laptop, keyboard, cell phone, cup etc. are furniture — not navigation hazards)
+        HIGH_VALUE_CLASSES = {
+            'person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck',
+            'dog', 'horse', 'cow', 'sheep',
+            'traffic light', 'fire hydrant', 'stop sign', 'parking meter',
+            'bench', 'chair', 'dining table',
+        }
+        new_types = (obj_types - self._prev_object_types) & HIGH_VALUE_CLASSES
         self._prev_object_types = obj_types
         if new_types:
-            logger.info(f"[SCHED] Rule 6 — new object types: {new_types}")
+            logger.info(f"[SCHED] Rule 6 — new significant objects: {new_types}")
             return self._capture(now, f"rule6_new_objects:{','.join(new_types)}", 0.0)
 
         # ════════════════════════════════════════════════════════════════
@@ -364,8 +372,8 @@ class DynamicFrameScheduler:
             return self._capture(now, "keepalive", 0.0)
 
         # ── Default stable window ─────────────────────────────────────
-        if elapsed >= 6.0:
-            return self._capture(now, "time_elapsed_6s", 0.0)
+        if elapsed >= 10.0:
+            return self._capture(now, "time_elapsed_10s", 0.0)
 
         return self._skip(f"stable_{elapsed:.1f}s", KEEPALIVE_SEC - elapsed)
 
