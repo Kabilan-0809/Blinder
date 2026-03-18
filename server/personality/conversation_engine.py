@@ -17,8 +17,8 @@ import logging  # type: ignore
 from google import genai  # type: ignore
 from google.genai import types as gtypes  # type: ignore
 from dotenv import load_dotenv  # type: ignore
-import memory_manager as mem_mgr  # type: ignore
-import companion_personality as iris  # type: ignore
+import agent.environment_memory as mem_mgr  # type: ignore
+import personality.companion_personality as iris  # type: ignore
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ def generate_guidance(session_id: str, scene: dict | None = None) -> str | None:
     # Get long-running tasks from task engine
     long_tasks: list = []
     try:
-        import task_manager  # type: ignore
+        import agent.task_manager as task_manager  # type: ignore
         engine = task_manager.get_engine(session_id)
         long_tasks = [t["description"] for t in engine.get_active_tasks() if t["type"] == "LONG_RUNNING"]
     except Exception:
@@ -184,7 +184,7 @@ def check_long_running_tasks(session_id: str, scene: dict) -> str | None:  # typ
 
     long_tasks: list = []
     try:
-        import task_manager  # type: ignore
+        import agent.task_manager as task_manager  # type: ignore
         engine = task_manager.get_engine(session_id)
         long_tasks = [t["description"] for t in engine.get_active_tasks() if t["type"] == "LONG_RUNNING"]
     except Exception:

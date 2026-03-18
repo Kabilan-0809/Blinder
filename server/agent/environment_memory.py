@@ -108,7 +108,7 @@ def clear_navigation_goal(session_id: str):  # type: ignore
     mem["navigation_goal"] = None
     mem["task_status"] = "completed"
     
-    import task_manager  # type: ignore
+    import agent.task_manager as task_manager  # type: ignore
     engine = task_manager.get_engine(session_id)
     engine.complete_navigation()
     logger.info(f"[MEM] Navigation complete for session {session_id}")
@@ -119,15 +119,15 @@ def clear_navigation_goal(session_id: str):  # type: ignore
 # ─────────────────────────────────────────────────────────────
 
 def add_long_running_task(session_id: str, task: str):  # type: ignore
-    import task_manager  # type: ignore
+    import agent.task_manager as task_manager  # type: ignore
     task_manager.get_engine(session_id).add_task(task, "LONG_RUNNING", "safety")
 
 def add_short_task(session_id: str, task: str):  # type: ignore
-    import task_manager  # type: ignore
+    import agent.task_manager as task_manager  # type: ignore
     task_manager.get_engine(session_id).add_task(task, "SHORT", "scene")
 
 def remove_short_task(session_id: str, task_desc: str):  # type: ignore
-    import task_manager  # type: ignore
+    import agent.task_manager as task_manager  # type: ignore
     engine = task_manager.get_engine(session_id)
     # Find by description and remove
     for t in engine.get_active_tasks():
@@ -137,7 +137,7 @@ def remove_short_task(session_id: str, task_desc: str):  # type: ignore
 
 def get_active_tasks(session_id: str) -> dict:  # type: ignore
     """Legacy compat: returns old-style dict mapping."""
-    import task_manager  # type: ignore
+    import agent.task_manager as task_manager  # type: ignore
     engine = task_manager.get_engine(session_id)
     tasks = engine.get_active_tasks()
     return {
