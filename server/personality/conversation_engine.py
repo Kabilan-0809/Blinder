@@ -83,7 +83,7 @@ def generate_guidance(session_id: str, scene: dict | None = None) -> str | None:
     prompt = f"""Navigation goal: "{goal}"
 Status: {task_status}
 
-Current scene: {scene_desc}
+Current spatial scene: {scene_desc}
 
 Active monitoring tasks:
 {tasks_text}
@@ -91,7 +91,11 @@ Active monitoring tasks:
 Recent conversation:
 {history_text}
 
-Give your next navigation instruction or scene update. Be natural & varied (max 25 words):"""
+Give your next navigation instruction. RULES:
+- State DIRECTION (left/right/ahead/behind) and DISTANCE in metres for anything you mention.
+- Use clock positions ("at your 9 o'clock") when helpful.
+- NEVER mention colors, textures, or patterns.
+- Be warm and natural but spatially precise. Max 30 words:"""
 
     system_prompt = _build_system_prompt(session_id, mem)
 
@@ -138,13 +142,18 @@ def answer_question(session_id: str, question: str, scene: dict | None = None) -
     stats = mem.get("session_stats", {})
     stats["questions_asked"] = stats.get("questions_asked", 0) + 1
 
-    prompt = f"""Scene description: {scene_desc}
+    prompt = f"""Spatial scene data: {scene_desc}
 Visible signs: {signs or 'none'}
 Crowd density: {crowd}
 
 User question: "{question}"
 
-Answer directly and naturally (under 20 words). Be warm and helpful, like talking to a friend."""
+Answer ONLY in spatial terms a blind person can act on. RULES:
+- State exact direction: left / right / ahead / behind / slightly left / slightly right.
+- State a CLOCK POSITION (e.g. "at your 9 o'clock") for every object.
+- State ESTIMATED DISTANCE in metres or steps.
+- NEVER mention color, texture, or visual appearance.
+- Be concise and actionable (under 25 words). Example: 'Your bag is 1 metre to your left, at your 9 o'clock. Reach down slightly.'"""
 
     system_prompt = _build_system_prompt(
         session_id, mem,
