@@ -17,6 +17,7 @@ import logging  # type: ignore
 from google import genai  # type: ignore
 from google.genai import types as gtypes  # type: ignore
 from dotenv import load_dotenv  # type: ignore
+import re  # type: ignore
 import agent.environment_memory as mem_mgr  # type: ignore
 import personality.companion_personality as iris  # type: ignore
 
@@ -27,6 +28,40 @@ client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 # Disable thinking for fast, cheap responses
 _NO_THINK = gtypes.ThinkingConfig(thinking_budget=0)
+
+# Stop-words to ignore when comparing guidance for similarity
+_STOP = {
+    'a', 'an', 'the', 'is', 'are', 'was', 'be', 'been', 'being',
+    'to', 'of', 'and', 'in', 'on', 'at', 'for', 'with', 'you',
+    'your', 'i', 'it', 'its', "it's", 'there', 'here', 'this',
+    'that', 'just', 'now', 'so', 'let', "let's", 'about', 'up',
+    'go', 'can', 'will', 'me', 'my', 'by', "you're", 'or', 'if',
+}
+
+
+def _content_words(text: str) -> set:  # type: ignore
+    """Extract meaningful content words from a string for similarity comparison."""
+    tokens = re.sub(r"[^a-z0-9']", ' ', text.lower()).split()
+    return {t for t in tokens if t not in _STOP and len(t) > 2}
+
+
+def _is_too_similar(new_text: str, history: list, threshold: float = 0.50) -> bool:  # type: ignore
+    """
+    Returns True if new_text overlaps >threshold with ANY of the last 4 guidance strings.
+    Uses Jaccard index on content words.
+    """
+    new_words = _content_words(new_text)
+    if not new_words:
+        return False
+    for past in history[-4:]:        # only compare against recent 4
+        past_words = _content_words(past)
+        if not past_words:
+            continue
+        intersection = len(new_words & past_words)
+        union = len(new_words | past_words)
+        if union > 0 and (intersection / union) >= threshold:
+            return True
+    return False
 
 
 def _safe_text(response) -> str:  # type: ignore
@@ -59,16 +94,55 @@ def _build_system_prompt(session_id: str, mem: dict, extra_context: str = "") ->
 # Proactive navigation guidance
 # ─────────────────────────────────────────────────────────────
 
-def generate_guidance(session_id: str, scene: dict | None = None) -> str | None:  # type: ignore
+def generate_guidance(
+    session_id: str,
+    scene: dict | None = None,
+    nav_progress: dict | None = None,
+) -> str | None:  # type: ignore
+    """
+    Generate a single navigation instruction fusing:
+      - GPS route step (if route is loaded)
+      - Visual scene description
+      - Semantic dedup against recent guidance history
+    Returns None if the new guidance is too similar to something recently said.
+    """
     mem = mem_mgr.get_memory(session_id)
     goal = mem.get("navigation_goal") or "no specific destination"
     task_status = mem.get("task_status", "idle")
     history = mem.get("conversation_history", [])
     env = mem.get("environment_memory", {})
+    guidance_history = mem_mgr.get_guidance_history(session_id)
 
     scene_desc = (scene or {}).get("description") or env.get("last_scene_description") or "No scene data."
 
-    # Get long-running tasks from task engine
+    # ── GPS route step context ─────────────────────────────────
+    nav = nav_progress or mem.get("navigation_progress", {})
+    route_steps = nav.get("route_steps", [])
+    current_step_idx = nav.get("current_step", 0)
+    distance_to_turn = nav.get("distance_to_turn")
+    route_context = ""
+    if route_steps and current_step_idx < len(route_steps):
+        step_instr = route_steps[current_step_idx].get("instruction", "")
+        if distance_to_turn is not None:
+            route_context = (
+                f"GPS direction: {step_instr} "
+                f"(turn in approximately {distance_to_turn:.0f} metres)."
+            )
+        else:
+            route_context = f"GPS direction: {step_instr}."
+
+    # ── What has Iris said recently (avoid repetition)? ────────
+    recent_said = guidance_history[-4:] if guidance_history else []
+    avoid_block = ""
+    if recent_said:
+        bullet_list = "\n".join(f'  - "{g}"' for g in recent_said)
+        avoid_block = (
+            f"\nYou recently said:\n{bullet_list}\n"
+            "Do NOT repeat these ideas or phrasings. "
+            "Give a NEW, different instruction or observation.\n"
+        )
+
+    # ── Long-running task context ──────────────────────────────
     long_tasks: list = []
     try:
         import agent.task_manager as task_manager  # type: ignore
@@ -77,11 +151,12 @@ def generate_guidance(session_id: str, scene: dict | None = None) -> str | None:
     except Exception:
         pass
 
-    history_text = "\n".join([f"{t['role'].upper()}: {t['text']}" for t in history[-4:]]) if history else ""
     tasks_text = "\n".join([f"- {t}" for t in long_tasks]) if long_tasks else "None."
+    history_text = "\n".join([f"{t['role'].upper()}: {t['text']}" for t in history[-4:]]) if history else ""
 
     prompt = f"""Navigation goal: "{goal}"
 Status: {task_status}
+{route_context}
 
 Current spatial scene: {scene_desc}
 
@@ -90,7 +165,7 @@ Active monitoring tasks:
 
 Recent conversation:
 {history_text}
-
+{avoid_block}
 Give your next navigation instruction. RULES:
 - State DIRECTION (left/right/ahead/behind) and DISTANCE in metres for anything you mention.
 - Use clock positions ("at your 9 o'clock") when helpful.
@@ -105,7 +180,7 @@ Give your next navigation instruction. RULES:
             contents=prompt,
             config=gtypes.GenerateContentConfig(
                 system_instruction=system_prompt,
-                temperature=0.5,
+                temperature=0.6,
                 max_output_tokens=100,
                 thinking_config=_NO_THINK,
             ),
@@ -114,6 +189,12 @@ Give your next navigation instruction. RULES:
         if not reply:
             return None  # type: ignore
 
+        # ── Semantic dedup: suppress if too similar to recent guidance ──
+        if _is_too_similar(reply, guidance_history):
+            logger.info(f"[GUIDE] Suppressed (too similar to recent): '{reply[:60]}'")
+            return None  # type: ignore
+
+        mem_mgr.push_guidance(session_id, reply)
         iris._track_response(session_id, reply)
         logger.info(f"[GUIDE] → {reply}")
         return reply  # type: ignore

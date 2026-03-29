@@ -54,6 +54,7 @@ def _new_session() -> dict:  # type: ignore
             "last_scene_description": None,
         },
         "conversation_history": [],
+        "guidance_history": [],      # rolling last 8 guidance texts for dedup
         "last_location": None,
         "task_status": "idle",      # idle | active | paused | completed
         "pending_question": None,
@@ -196,3 +197,18 @@ def add_turn(session_id: str, role: str, text: str):  # type: ignore
     history.append({"role": role, "text": text})
     if len(history) > 10:
         history.pop(0)
+
+
+def push_guidance(session_id: str, text: str):  # type: ignore
+    """Record a spoken guidance string into the rolling guidance history (last 8)."""
+    mem = get_memory(session_id)
+    history = mem.setdefault("guidance_history", [])
+    history.append(text)
+    if len(history) > 8:
+        history.pop(0)
+
+
+def get_guidance_history(session_id: str) -> list:  # type: ignore
+    """Return the list of recently spoken guidance strings."""
+    mem = get_memory(session_id)
+    return mem.get("guidance_history", [])

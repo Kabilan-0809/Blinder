@@ -63,20 +63,63 @@ def _haversine(lat1: float, lng1: float, lat2: float, lng2: float) -> float:  # 
 # Google Places — resolve free-text destination to lat/lng
 # ─────────────────────────────────────────────────────────────
 
-def resolve_place(destination: str) -> dict:  # type: ignore
+def resolve_place(destination: str, lat: float | None = None, lng: float | None = None) -> dict:  # type: ignore
     """
-    Uses Google Places Text Search to resolve a natural-language destination
-    like "Surya Super Market" into { lat, lng, name }.
-    Falls back to treating destination as a raw address if Places call fails.
+    Uses Google Places to resolve a natural-language destination into { lat, lng, name }.
+
+    Strategy:
+    - If lat/lng provided and destination looks like a category/type query
+      ("nearest supermarket", "closest pharmacy"), use Nearby Search with
+      rankby=distance to get the truly closest place.
+    - Otherwise fall back to Text Search (good for named places like "Surya Market").
     """
     if not GOOGLE_MAPS_API_KEY:
         logger.warning("[NAV] No API key — skipping Places resolve, using raw text.")
         return {"lat": None, "lng": None, "name": destination}
 
+    # Detect "nearest/closest X" style queries — use nearby search for these
+    NEARBY_KEYWORDS = (
+        "nearest", "closest", "nearby", "near me", "around me",
+        "closest to me", "nearest to me",
+    )
+    is_nearby_query = any(kw in destination.lower() for kw in NEARBY_KEYWORDS)
+
+    if lat is not None and lng is not None and is_nearby_query:
+        # Strip qualifier words to get clean keyword for nearby search
+        keyword = destination.lower()
+        for kw in NEARBY_KEYWORDS:
+            keyword = keyword.replace(kw, "").strip()
+        keyword = keyword.strip(', ')
+
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        params = {
+            "location": f"{lat},{lng}",
+            "rankby": "distance",
+            "keyword": keyword or destination,
+            "key": GOOGLE_MAPS_API_KEY,
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            data = resp.json()
+            if data.get("status") == "OK" and data.get("results"):
+                result = data["results"][0]
+                loc = result["geometry"]["location"]
+                name = result.get("name", destination)
+                logger.info(f"[NAV] Nearby resolved: '{destination}' → '{name}' @ {loc}")
+                return {"lat": loc["lat"], "lng": loc["lng"], "name": name}
+            else:
+                logger.warning(f"[NAV] Nearby search status: {data.get('status')} — falling back to text search")
+        except Exception as e:
+            logger.error(f"[NAV] Nearby Places API error: {e}")
+
+    # Standard text search (works best for named destinations)
     url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-    params = {"query": destination, "key": GOOGLE_MAPS_API_KEY}
+    params_ts: dict = {"query": destination, "key": GOOGLE_MAPS_API_KEY}
+    if lat is not None and lng is not None:
+        params_ts["location"] = f"{lat},{lng}"
+        params_ts["radius"] = "5000"  # bias within 5 km
     try:
-        resp = requests.get(url, params=params, timeout=5)
+        resp = requests.get(url, params=params_ts, timeout=5)
         data = resp.json()
         if data.get("status") == "OK" and data.get("results"):
             result = data["results"][0]
@@ -107,8 +150,10 @@ def load_route(start_location: dict, destination: str, nav_progress: dict) -> bo
         logger.error("[NAV] GOOGLE_MAPS_API_KEY not set.")
         return False  # type: ignore
 
-    # Try to resolve destination to lat/lng first
-    place = resolve_place(destination)
+    # Pass start lat/lng into resolve_place for GPS-biased nearby search
+    start_lat = start_location.get("lat")
+    start_lng = start_location.get("lng")
+    place = resolve_place(destination, lat=start_lat, lng=start_lng)
     dest_param = f"{place['lat']},{place['lng']}" if place["lat"] else destination
 
     origin = f"{start_location['lat']},{start_location['lng']}"

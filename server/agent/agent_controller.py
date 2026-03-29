@@ -35,7 +35,7 @@ from dataclasses import dataclass, field  # type: ignore
 from speech.speech_to_text import transcribe_audio  # type: ignore
 import agent.environment_memory as mem_mgr  # type: ignore
 from agent.task_manager import extract_task, get_engine as get_task_engine  # type: ignore
-from navigation.navigation_engine import load_route, get_next_navigation_step  # type: ignore
+from navigation.navigation_engine import load_route, get_next_navigation_step, resolve_place  # type: ignore
 from vision.vision_safety_engine import run_safety_check  # type: ignore
 from scheduler.dynamic_frame_scheduler import DynamicFrameScheduler  # type: ignore
 from reasoning.scene_reasoner import analyze_frame, build_scene_insight  # type: ignore
@@ -215,10 +215,38 @@ class AgentController:
             mem_mgr.add_turn(self.session_id, "user", transcript)
             self.scheduler.reset()
             self.first_frame = True
+
+            # ── Auto load route if we already have GPS ─────────────
+            last_loc = mem["last_location"]
+            route_status_suffix = ""
+            if last_loc and last_loc.get("lat") and last_loc.get("lng"):
+                try:
+                    ok = await asyncio.to_thread(
+                        load_route,
+                        last_loc,
+                        goal,
+                        mem["navigation_progress"],
+                    )
+                    if ok:
+                        step_count = len(mem["navigation_progress"].get("route_steps", []))
+                        route_status_suffix = f" I've loaded a {step_count}-step walking route."
+                        logger.info(f"🗺️ [NAV] Auto-loaded route: {step_count} steps to '{goal}'")
+                    else:
+                        route_status_suffix = " I couldn't find an exact route, but I'll guide you visually."
+                        logger.warning(f"[NAV] Auto route load failed for goal='{goal}'")
+                except Exception as e:
+                    logger.error(f"[NAV] Auto route load error: {e}")
+                    route_status_suffix = " I'll guide you visually for now."
+            else:
+                route_status_suffix = " Please enable GPS so I can load turn-by-turn directions."
+                logger.info("[NAV] No GPS yet — skipping auto route load")
+
             reply = await asyncio.to_thread(
                 handle_chat, self.session_id,
                 f"I want to go to {goal}. Acknowledge my goal warmly and tell me you'll guide me there."
             )
+            if route_status_suffix:
+                reply = (reply or "").rstrip('. ') + route_status_suffix
             logger.info(f"🗺️ [NAV] Goal set: '{goal}'")
 
         elif intent == "query":
@@ -421,8 +449,9 @@ class AgentController:
         conv_response = None
         if task_status == "active" and goal and scene:
             try:
+                nav_progress = mem.get("navigation_progress", {})
                 conv_response = await asyncio.to_thread(
-                    generate_guidance, self.session_id, scene
+                    generate_guidance, self.session_id, scene, nav_progress
                 )
             except Exception as e:
                 logger.error(f"[CONV] generate_guidance error: {e}")
