@@ -258,11 +258,26 @@ class AgentController:
 
         elif intent == "interrupt":
             mem["task_status"] = "paused"
+            doc_mode = mem.get("document_mode", {})
+            doc_msg = ""
+            if doc_mode.get("active"):
+                doc_mode["active"] = False
+                doc_mode["status"] = "idle"
+                doc_msg = " Document reading stopped."
             mem_mgr.add_turn(self.session_id, "user", transcript)
             reply = await asyncio.to_thread(
                 handle_chat, self.session_id,
                 f"User wants to pause: {task.get('text', transcript)}"
             )
+            if doc_msg:
+                reply = (reply or "") + doc_msg
+
+        elif intent == "read_document":
+            mem["document_mode"]["active"] = True
+            mem["document_mode"]["status"] = "scanning"
+            mem["document_mode"]["scanned_text"] = None
+            mem_mgr.add_turn(self.session_id, "user", transcript)
+            reply = "Hold the document in front of you. I'll read it when I get a clear view."
 
         else:  # chat / unknown
             mem_mgr.add_turn(self.session_id, "user", transcript)
@@ -311,6 +326,26 @@ class AgentController:
         goal = mem.get("navigation_goal")
         task_status = mem.get("task_status", "idle")
         pending_q = mem.get("pending_question")
+
+        # ── 0. DOCUMENT SCANNING BYPASS ────────────────────────────────
+        doc_mode = mem.get("document_mode", {})
+        if doc_mode.get("active") and doc_mode.get("status") == "scanning":
+            from vision.ocr_engine import scan_document  # type: ignore
+            try:
+                scan_result = await asyncio.to_thread(scan_document, jpeg_bytes)
+                if scan_result["status"] == "bad":
+                    response.add("safety", scan_result["feedback"], priority=2)
+                elif scan_result["status"] == "good":
+                    doc_mode["status"] = "reading"
+                    doc_mode["scanned_text"] = scan_result["text"]
+                    reply = "Document captured. What would you like to know?"
+                    response.add("response", reply, priority=1)
+                    mem_mgr.add_turn(self.session_id, "assistant", reply)
+                    
+                    # If there's a pending question, let the NEXT frame answer it.
+            except Exception as e:
+                logger.error(f"[OCR] Scanning error: {e}")
+            return response
 
         # Get long-running tasks
         long_tasks: list = []

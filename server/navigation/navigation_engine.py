@@ -45,6 +45,25 @@ def _strip_html(html: str) -> str:  # type: ignore
     return s.get_text()  # type: ignore
 
 
+def _sanitize_instruction(text: str) -> str:  # type: ignore
+    """
+    Remove compass directions from raw directions to prevent blind users
+    from hearing 'Head west' when they don't know their bearing indoors.
+    """
+    import re  # type: ignore
+    # Remove HTML first
+    clean = _strip_html(text)
+    
+    # 1. 'Head north on X' -> 'Head onto X'
+    clean = re.sub(r'\b(Head|Walk)\s+(north|south|east|west)(?:-?(west|east|bound))?\b', r'\1', clean, flags=re.IGNORECASE)
+    
+    # 2. Fix awkward phrasing like 'Head  on X' or 'Head  onto X' created by Step 1
+    clean = re.sub(r'\bHead\s+on\s+\b', 'Head onto ', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'\s+', ' ', clean).strip()
+
+    return clean
+
+
 # ─────────────────────────────────────────────────────────────
 # Haversine distance
 # ─────────────────────────────────────────────────────────────
@@ -184,7 +203,7 @@ def load_route(start_location: dict, destination: str, nav_progress: dict) -> bo
             steps.append({
                 "lat": end_loc["lat"],
                 "lng": end_loc["lng"],
-                "instruction": _strip_html(raw),
+                "instruction": _sanitize_instruction(raw),
                 "distance_m": step["distance"]["value"],
             })
 

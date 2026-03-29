@@ -58,6 +58,12 @@ def _new_session() -> dict:  # type: ignore
         "last_location": None,
         "task_status": "idle",      # idle | active | paused | completed
         "pending_question": None,
+        # ── Document scanning state ──
+        "document_mode": {
+            "active": False,
+            "status": "idle",       # idle | scanning | reading
+            "scanned_text": None,
+        },
         # ── Iris personality state ──
         "user_profile": {
             "name": None,              # User's preferred name

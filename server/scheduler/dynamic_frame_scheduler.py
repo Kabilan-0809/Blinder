@@ -90,7 +90,7 @@ WALK_SPEED_MPS       = 1.2    # average user walking speed (m/s)
 CAMERA_FOV_MAX_M     = 25.0   # max visible path the camera can see (m)
 
 MIN_GAP_SEC          = 6.0    # hard minimum between LLM calls (anti-flood) — raised to avoid rate limits
-KEEPALIVE_SEC        = 20.0   # maximum silence — always call LLM within this
+KEEPALIVE_SEC        = 30.0   # maximum silence — always call LLM within this
 
 MIN_CLEAR_M          = 10.0   # below this, treat as approaching decision point
 NAV_TURN_THRESHOLD_M = 20.0   # fire if navigation turn is within this distance
@@ -230,6 +230,12 @@ class DynamicFrameScheduler:
         self._prev_object_types : set   = set()
         self._prev_scene_hash   : int   = 0
         self._force_next        : bool  = True   # capture on very first frame
+        self._last_rule_trigger : dict[str, float] = {}
+
+    def _check_cooldown(self, rule_group: str, now: float, cooldown_s: float) -> bool:  # type: ignore
+        """Returns True if the rule is allowed to fire (not on cooldown)."""
+        last = self._last_rule_trigger.get(rule_group, 0.0)
+        return (now - last) >= cooldown_s
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -277,7 +283,7 @@ class DynamicFrameScheduler:
         # ── Session init / hard force ─────────────────────────────────
         if force or self._force_next:
             self._force_next = False
-            return self._capture(now, "force", 0.0)
+            return self._capture(now, "force", "force", 0.0)
 
         # ════════════════════════════════════════════════════════════════
         # TRIGGER RULES  (capture = True)
@@ -286,51 +292,56 @@ class DynamicFrameScheduler:
         # ── Rule 3: User question → immediate ────────────────────────
         if user_query:
             logger.info(f"[SCHED] Rule 3 — user query: '{user_query}'")
-            return self._capture(now, "rule3_user_question", 0.0)
+            return self._capture(now, "rule3", "rule3_user_question", 0.0)
 
         # ── Rule 2: New intersection / environment change ─────────────
         if navigation_state.get("at_decision_point"):
-            logger.info("[SCHED] Rule 2 — navigation decision point")
-            return self._capture(now, "rule2_nav_decision_point", 0.0)
+            if self._check_cooldown("rule2", now, 20.0):
+                logger.info("[SCHED] Rule 2 — navigation decision point")
+                return self._capture(now, "rule2", "rule2_nav_decision_point", 0.0)
 
         env = session_memory.get("environment_memory", {})
         if session_memory.get("_decision_point_flagged"):
             session_memory["_decision_point_flagged"] = False
-            logger.info("[SCHED] Rule 2 — visual decision point flagged")
-            return self._capture(now, "rule2_visual_decision_point", 0.0)
+            if self._check_cooldown("rule2", now, 20.0):
+                logger.info("[SCHED] Rule 2 — visual decision point flagged")
+                return self._capture(now, "rule2", "rule2_visual_decision_point", 0.0)
 
         # ── Rule 5: Navigation turn within 20m ───────────────────────
         next_turn = navigation_state.get("next_turn_distance_m")
         if next_turn is not None and next_turn <= NAV_TURN_THRESHOLD_M:
-            logger.info(f"[SCHED] Rule 5 — nav turn in {next_turn:.0f}m")
-            return self._capture(now, f"rule5_nav_turn_{next_turn:.0f}m", 0.0)
+            if self._check_cooldown("rule5", now, 15.0):
+                logger.info(f"[SCHED] Rule 5 — nav turn in {next_turn:.0f}m")
+                return self._capture(now, "rule5", f"rule5_nav_turn_{next_turn:.0f}m", 0.0)
 
         # ── Rule 4: Sign/label detected by YOLO ──────────────────────
         obj_types = scene_state.get("object_types", set())
         sign_hits = obj_types & SIGN_CLASSES
         if sign_hits:
-            logger.info(f"[SCHED] Rule 4 — sign detected: {sign_hits}")
-            return self._capture(now, f"rule4_sign:{','.join(sign_hits)}", 0.0)
+            if self._check_cooldown("rule4", now, 15.0):
+                logger.info(f"[SCHED] Rule 4 — sign detected: {sign_hits}")
+                return self._capture(now, "rule4", f"rule4_sign:{','.join(sign_hits)}", 0.0)
 
         # ── Rule 6: Sudden obstacle density (crowd/cluster) ───────────
         n_objects = len(scene_state.get("objects", []))
         if n_objects >= CROWD_THRESHOLD:
-            logger.info(f"[SCHED] Rule 6 — high density: {n_objects} objects")
-            return self._capture(now, f"rule6_density:{n_objects}", 0.0)
+            if self._check_cooldown("rule6_density", now, 15.0):
+                logger.info(f"[SCHED] Rule 6 — high density: {n_objects} objects")
+                return self._capture(now, "rule6_density", f"rule6_density:{n_objects}", 0.0)
 
         # Rule 6b: Only trigger on HIGH-VALUE new object classes, not routine ones
-        # (laptop, keyboard, cell phone, cup etc. are furniture — not navigation hazards)
+        # (laptop, keyboard, cell phone, cup, bench, dining table, chair etc are furniture — not immediate hazards)
         HIGH_VALUE_CLASSES = {
             'person', 'bicycle', 'car', 'motorcycle', 'bus', 'truck',
             'dog', 'horse', 'cow', 'sheep',
             'traffic light', 'fire hydrant', 'stop sign', 'parking meter',
-            'bench', 'chair', 'dining table',
         }
         new_types = (obj_types - self._prev_object_types) & HIGH_VALUE_CLASSES
         self._prev_object_types = obj_types
         if new_types:
-            logger.info(f"[SCHED] Rule 6 — new significant objects: {new_types}")
-            return self._capture(now, f"rule6_new_objects:{','.join(new_types)}", 0.0)
+            if self._check_cooldown("rule6_new_objects", now, 15.0):
+                logger.info(f"[SCHED] Rule 6 — new significant objects: {new_types}")
+                return self._capture(now, "rule6_new_objects", f"rule6_new_objects:{','.join(new_types)}", 0.0)
 
         # ════════════════════════════════════════════════════════════════
         # SUPPRESSION RULES  (capture = False)
@@ -369,11 +380,11 @@ class DynamicFrameScheduler:
         # ── Keepalive — at least one call per KEEPALIVE_SEC ───────────
         if elapsed >= KEEPALIVE_SEC:
             logger.info(f"[SCHED] Keepalive after {elapsed:.1f}s")
-            return self._capture(now, "keepalive", 0.0)
+            return self._capture(now, "keepalive", "keepalive", 0.0)
 
         # ── Default stable window ─────────────────────────────────────
         if elapsed >= 10.0:
-            return self._capture(now, "time_elapsed_10s", 0.0)
+            return self._capture(now, "default", "time_elapsed_10s", 0.0)
 
         return self._skip(f"stable_{elapsed:.1f}s", KEEPALIVE_SEC - elapsed)
 
@@ -409,8 +420,9 @@ class DynamicFrameScheduler:
 
     # ── Internal helpers ──────────────────────────────────────────────
 
-    def _capture(self, now: float, rule: str, delay_s: float) -> dict:  # type: ignore
+    def _capture(self, now: float, rule_group: str, rule: str, delay_s: float) -> dict:  # type: ignore
         self._last_llm_time = now
+        self._last_rule_trigger[rule_group] = now
         logger.debug(f"[SCHED] ✅ CAPTURE ({rule})")
         return {"capture": True, "rule": rule, "delay_s": delay_s}
 

@@ -166,11 +166,17 @@ Active monitoring tasks:
 Recent conversation:
 {history_text}
 {avoid_block}
-Give your next navigation instruction. RULES:
-- State DIRECTION (left/right/ahead/behind) and DISTANCE in metres for anything you mention.
-- Use clock positions ("at your 9 o'clock") when helpful.
+Give your next navigation instruction. NEW CRITICAL RULES:
+- Evaluate the scene. If it is INDOORS (e.g., house, room, hallway):
+  * Keep your ENTIRE response UNDER 12 WORDS.
+  * DO NOT read out the GPS direction yet. Just describe the immediate path or say "Head outside."
+- If the scene is OUTDOORS:
+  * Fuse the GPS direction with the scene description. Keep it under 25 words.
+- State DIRECTION (left/right/ahead/behind) and DISTANCE in metres.
+- NEVER use compass directions (North/South/East/West). Convert to relative directions (left/right/ahead/behind).
 - NEVER mention colors, textures, or patterns.
-- Be warm and natural but spatially precise. Max 30 words:"""
+- Be warm and natural but spatially precise.
+"""
 
     system_prompt = _build_system_prompt(session_id, mem)
 
@@ -214,16 +220,37 @@ Give your next navigation instruction. RULES:
 
 def answer_question(session_id: str, question: str, scene: dict | None = None) -> str:  # type: ignore
     mem = mem_mgr.get_memory(session_id)
-    env = mem.get("environment_memory", {})
-    scene_desc = (scene or {}).get("description") or env.get("last_scene_description") or "No scene data."
-    signs = ", ".join((scene or {}).get("signs_seen", env.get("observed_signs", [])))  # type: ignore
-    crowd = (scene or {}).get("crowd_density") or env.get("crowd_density", "unknown")
-
+    
     # Track stats
     stats = mem.get("session_stats", {})
     stats["questions_asked"] = stats.get("questions_asked", 0) + 1
 
-    prompt = f"""Spatial scene data: {scene_desc}
+    doc_mode = mem.get("document_mode", {})
+    
+    # ── DOCUMENT RAG Q&A ─────────────────────────────────────────
+    if doc_mode.get("status") == "reading" and doc_mode.get("scanned_text"):
+        prompt = f"""You are a helpful document assistant for a blind user.
+The user scanned a document earlier. Here is the extracted text:
+--------------------
+{doc_mode["scanned_text"]}
+--------------------
+
+User question: "{question}"
+
+Answer the question PURELY based on the document text. Be concise, warm, and helpful. Max 40 words."""
+        system_prompt = _build_system_prompt(
+            session_id, mem,
+            extra_context="You are answering a question about a scanned document. Do not describe the room."
+        )
+        
+    # ── STANDARD SPATIAL Q&A ─────────────────────────────────────
+    else:
+        env = mem.get("environment_memory", {})
+        scene_desc = (scene or {}).get("description") or env.get("last_scene_description") or "No scene data."
+        signs = ", ".join((scene or {}).get("signs_seen", env.get("observed_signs", [])))  # type: ignore
+        crowd = (scene or {}).get("crowd_density") or env.get("crowd_density", "unknown")
+
+        prompt = f"""Spatial scene data: {scene_desc}
 Visible signs: {signs or 'none'}
 Crowd density: {crowd}
 
@@ -235,11 +262,11 @@ Answer ONLY in spatial terms a blind person can act on. RULES:
 - State ESTIMATED DISTANCE in metres or steps.
 - NEVER mention color, texture, or visual appearance.
 - Be concise and actionable (under 25 words). Example: 'Your bag is 1 metre to your left, at your 9 o'clock. Reach down slightly.'"""
-
-    system_prompt = _build_system_prompt(
-        session_id, mem,
-        extra_context="You are answering a specific question. Be direct and factual but warm."
-    )
+        
+        system_prompt = _build_system_prompt(
+            session_id, mem,
+            extra_context="You are answering a specific question. Be direct and factual but warm."
+        )
 
     try:
         response = client.models.generate_content(

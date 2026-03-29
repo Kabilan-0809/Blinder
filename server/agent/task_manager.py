@@ -106,7 +106,7 @@ TASK_EXTRACT_PROMPT = """You are a task parser for a blind navigation AI assista
 Parse the user's spoken sentence and return ONLY a JSON object with this exact schema:
 
 {
-  "intent": "navigate" | "query" | "interrupt" | "chat",
+  "intent": "navigate" | "query" | "interrupt" | "chat" | "read_document",
   "navigation_goal": "<destination string>" | null,
   "tasks": [
     {
@@ -127,14 +127,16 @@ TASK TYPE RULES:
   subsystem: scene
 
 - TEMP_CONTEXT: a question answerable from session memory only — no camera needed
-  e.g. "which direction were we heading?", "what is my goal?", "how far to the turn?"
+  e.g. "which direction were we heading?", "what is my goal?", "how far to the turn?", "what does the menu say?"
   subsystem: memory
 
 INTENT RULES:
 - "navigate": user states a destination to go to
   → always create a LONG_RUNNING navigation task in tasks[]
-- "query": user asks a one-time question about surroundings → SHORT task
-- "interrupt": user wants to stop/pause/cancel current navigation
+- "read_document": user asks to read a document, menu, sign, mail, or piece of paper
+  → enter document mode for scanning
+- "query": user asks a one-time question about surroundings or wants to ask about a scanned document
+- "interrupt": user wants to stop/pause/cancel current navigation or scanning
 - "chat": casual conversation → TEMP_CONTEXT or conversation task
 
 PRIORITY ASSIGNMENT (do not include in output, computed internally):
@@ -177,6 +179,13 @@ Output: {
   "tasks": [
     {"type": "TEMP_CONTEXT", "description": "Recall current navigation direction from memory", "subsystem": "memory"}
   ]
+}
+
+Input: "Read this menu for me"
+Output: {
+  "intent": "read_document",
+  "navigation_goal": null,
+  "tasks": []
 }
 
 Input: "Stop, I need a minute"
